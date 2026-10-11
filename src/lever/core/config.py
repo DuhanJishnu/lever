@@ -40,5 +40,5 @@ class HarnessConfig(BaseModel):
             prompt_version="v1",
         )
         if overrides:
-            return base.model_copy(update=overrides)  # type: ignore[arg-type]
+            return base.model_copy(update=overrides)
         return base

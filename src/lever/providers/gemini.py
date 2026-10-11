@@ -23,14 +23,14 @@ class GeminiProvider:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not set (see .env.example)")
         # Lazy import so tests without the SDK still collect.
-        from google import genai  # type: ignore[import-not-found]
+        from google import genai
 
         self._client = genai.Client(api_key=self.api_key)
 
     def count_tokens(self, messages: list[dict[str, Any]]) -> int:
         try:
             resp = self._client.models.count_tokens(
-                model=self.model, contents=self._to_contents(messages)
+                model=str(self.model), contents=self._to_contents(messages)
             )
             return int(resp.total_tokens or 0)
         except Exception:
@@ -59,7 +59,9 @@ class GeminiProvider:
             # Only pass generation config we are sure about.
             kwargs["config"] = {"temperature": temperature}
             if tool_config:
-                kwargs["config"]["tools"] = tool_config  # type: ignore[index]
+                tools_cfg = kwargs["config"]
+                assert isinstance(tools_cfg, dict)
+                tools_cfg["tools"] = tool_config
             return self._client.models.generate_content(**kwargs)
 
         resp = await asyncio.to_thread(_call)

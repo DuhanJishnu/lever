@@ -6,7 +6,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 evals/results/
-.http_cache/
 lever_cache/
-*.db
-*.db-*
+.lever_cache.jsonl
+.lever_events.db
+.lever_events.db-*

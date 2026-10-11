@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import cast
 
-from ..core.events import Event
+from ..core.events import Event, EventType
 
 _SCHEMA = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
 
@@ -37,7 +38,7 @@ class EventStore:
                 json.dumps(event.data, default=str),
             ),
         )
-        event.id = int(cur.lastrowid)
+        event.id = int(cur.lastrowid or 0)
         self._conn.commit()
         return event
 
@@ -55,7 +56,7 @@ class EventStore:
                     session_id=sid,
                     seq=seq,
                     ts=ts,
-                    type=typ,  # type: ignore[arg-type]
+                    type=cast(EventType, typ),
                     data=json.loads(data),
                 )
             )
