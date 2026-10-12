@@ -63,7 +63,6 @@ def run(
     db: str = typer.Option(".lever_events.db", help="SQLite event-store path."),
     cache_path: str = typer.Option(".lever_cache.jsonl", help="LLM response cache path."),
     fake: bool = typer.Option(False, "--fake", help="Use FakeProvider (no API key)."),
-    model: str | None = typer.Option(None, help="Override model name."),
     max_steps: int | None = typer.Option(None, help="Override max_steps."),
 ) -> None:
     load_dotenv()
@@ -75,8 +74,6 @@ def run(
     from lever.store.sqlite import EventStore
 
     cfg = _load_config(config)
-    if model:
-        cfg = cfg.model_copy(update={"model": model})
     if max_steps:
         cfg = cfg.model_copy(update={"max_steps": max_steps})
 
@@ -88,7 +85,7 @@ def run(
     else:
         from lever.providers.gemini import GeminiProvider
 
-        provider = GeminiProvider(model=cfg.model)
+        provider = GeminiProvider()
 
     store = EventStore(db)
     session = Session(source=Path(repo))

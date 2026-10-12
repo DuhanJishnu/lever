@@ -9,8 +9,10 @@ evals/results/
 evals/work/
 lever_cache/
 .lever_cache.jsonl
+.lever_cache-live*.jsonl
 .lever_events.db
 .lever_events.db-*
+.lever_events-live*.db*
 .lever_workspaces/
 
 /harness_engineering_distilled

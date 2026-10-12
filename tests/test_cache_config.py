@@ -11,7 +11,7 @@ def test_cache_hit_and_persistence(tmp_path):
     c1 = ResponseCache(p)
     cfg = HarnessConfig()
     msgs = [{"role": "user", "content": "say hi"}]
-    key = cache_key(cfg.model, msgs, [], cfg)
+    key = cache_key("test-model", msgs, [], cfg)
     assert c1.get(key) is None
     c1.put(key, {"text": "hi", "tool_calls": []})
     assert c1.get(key) == {"text": "hi", "tool_calls": []}

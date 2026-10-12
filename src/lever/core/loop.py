@@ -20,6 +20,11 @@ SYSTEM_B0 = (
     "When the task is done, answer with a short summary and call no tools."
 )
 
+# Empty turns (no text, no calls) are transient model-side hiccups, not "done".
+# Retry them within the step budget instead of stopping. Constant across all
+# ablation configs, so it cannot bias B0-vs-B8 comparisons.
+MAX_EMPTY_RETRIES = 3
+
 
 def fresh_context(task: str) -> list[dict[str, Any]]:
     """One isolated context per task — no history leaks between tasks."""
@@ -35,7 +40,7 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return max(1, sum(len(str(m.get("content", ""))) for m in messages) // 4)
 
 
-StoppedBy = Literal["model", "guardrail", "max_steps"]
+StoppedBy = Literal["model", "guardrail", "max_steps", "empty"]
 
 
 @dataclass
@@ -85,6 +90,7 @@ async def run_loop(
     trace: list[LoopIteration] = []
     stopped_by: StoppedBy = "model"
     answer = ""
+    empty_retries = 0
 
     try:
         for _ in range(config.max_steps):
@@ -100,15 +106,28 @@ async def run_loop(
                 break
 
             ctx_size = estimate_tokens(messages)
+            model_name = str(getattr(provider, "model", "fake"))
             store.append(Event(session_id=session.session_id, seq=0,
                                type="model_request",
-                               data={"messages": messages, "model": config.model}))
+                               data={"messages": messages, "model": model_name}))
             resp = await _generate(provider, messages, tools.definitions, config, cache)
             store.append(Event(session_id=session.session_id, seq=0,
                                type="model_response", data=resp.model_dump()
                                if hasattr(resp, "model_dump") else dict(resp)))
             text = str(getattr(resp, "text", ""))
             tool_calls = list(getattr(resp, "tool_calls", []) or [])
+            thought_blocks = list(getattr(resp, "thought_blocks", []) or [])
+
+            if not text and not tool_calls:
+                # Transient empty turn: do NOT log it as an answer and do NOT
+                # append it to history (it would pollute replay). Retry.
+                empty_retries += 1
+                if empty_retries > MAX_EMPTY_RETRIES:
+                    answer = "(no response)"
+                    stopped_by = "empty"
+                    break
+                continue
+            empty_retries = 0
 
             if not tool_calls:
                 answer = text or "(no response)"
@@ -118,15 +137,22 @@ async def run_loop(
                 stopped_by = "model"
                 break
 
-            # Record assistant turn incl. which calls it made (B0 simplification:
-            # call IDs aren't replayed; the live-model test decides if this suffices).
-            calls_note = ", ".join(
-                f"{c.name}({c.args})" if hasattr(c, "name") else str(c)
-                for c in tool_calls
-            )
-            messages.append({"role": "assistant",
-                             "content": f"{text}\n[calls: {calls_note}]" if text
-                             else f"[calls: {calls_note}]"})
+            # Record the assistant turn with STRUCTURED tool calls (not prose).
+            # The provider renders these as native function-call parts, so the
+            # model sees its own calls as calls — prose annotations here get
+            # parroted back as final answers (observed live with 3.8-flash).
+            def _as_dict(call: Any) -> dict[str, Any]:
+                if hasattr(call, "model_dump"):
+                    d = call.model_dump()
+                    return {"name": d.get("name", ""), "args": d.get("args", {}),
+                            "thought_signature": d.get("thought_signature")}
+                return {"name": call.get("name", ""), "args": call.get("args", {}),
+                        "thought_signature": call.get("thought_signature")}
+
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": text}
+            assistant_msg["tool_calls"] = [_as_dict(c) for c in tool_calls]
+            assistant_msg["thought_blocks"] = thought_blocks
+            messages.append(assistant_msg)
             events: list[ToolEvent] = []
             for call in tool_calls:
                 name = call.name if hasattr(call, "name") else call.get("name", "")
@@ -164,7 +190,8 @@ async def _generate(
         return await provider.generate(messages, definitions, config)
     from ..providers.cache import cache_key
 
-    key = cache_key(config.model, messages, definitions, config)
+    key = cache_key(str(getattr(provider, "model", "fake")),
+                    messages, definitions, config)
     hit = cache.get(key)
     if hit is not None:
         from ..providers.base import ModelResponse

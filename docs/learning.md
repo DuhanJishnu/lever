@@ -226,6 +226,124 @@
 
 ---
 
+## Live debugging interlude (12 Oct 2026) — Step 21
+
+> Jishnu ran B0 live against `bug-repo/` (single-file `add.py`, `return a - b`
+> bug) with `LEVER_MODEL=gemini-3.8-flash`. The agent failed twice without
+> touching the bug. This step records the investigation (4 real defects), the
+> fixes, and the final verified run. Also adopts Jishnu's env-model refactor
+> (model from `LEVER_MODEL`, removed from `HarnessConfig`) with tests kept green.
+
+### Step 21a — Verdict on the two failed runs: transport bugs, not model stupidity
+
+1. **What:** Run 1: `bash("git status; ls -la")` → cmd.exe has no `;` chaining,
+   so git got a garbage command → recovered with `git status` → then the model
+   emitted literal text `"[calls: bash(...)]"` with zero tool calls and stopped.
+   Run 2: same parrot-stop after one good call. `bug-repo/add.py` (3-line bug)
+   was never read. Model moved 2.5→3.8-flash by Jishnu (kept: `.env.example`
+   updated to `gemini-3.8-flash`).
+2. **Why:** Two independent defects: (a) our bash description never said the
+   shell is cmd.exe; (b) the model parroted our history annotation — the
+   `[calls: ...]` / `[tool result ...]:` prose framing was imitated as output
+   instead of continued as action. Prose history is a B0 simplification that
+   failed its live test.
+3. **Theory:** A model imitates the *form* of its context. Fake call-notation in
+   prose teaches a fake call-notation response; only native `FunctionCall` /
+   `FunctionResponse` parts carry the "this is an action, continue it" semantics.
+   Harness-engineering loop in miniature: observe failure → change the
+   environment (history format), not the prompt.
+
+### Step 21b — Fix 1: native function parts in history (`gemini.py`, `loop.py`)
+
+1. **What:** Loop stores structured `tool_calls` on the assistant message — the
+   `[calls: ...]` text hack is gone. `_to_contents` renders them via
+   `Part.from_function_call` / `Part.from_function_response`; verified
+   constructible against the installed SDK. `bash` description now documents
+   cmd.exe (`&&`/`||`, `dir`, no `;`/`ls`). Tests: conversion test rewritten
+   (native parts, no-prose assertion), new structured-history loop test.
+2. **Why:** Removes both observed failure modes at the mechanism level; the
+   cmd.exe hint is decision #4 (model-friendly environment description).
+3. **Theory:** Adapter pattern a third time: canonical `{role, content,
+   tool_calls}` history ↔ SDK parts, all quirk code in `_to_contents`. Canonical
+   form stays provider-agnostic (OpenAI messages map to the same shape).
+
+### Step 21c — Fix 2: thought signatures, bytes vs str (`base.py`, `gemini.py`)
+
+1. **What:** First replay attempt 400'd: `Function call is missing a
+   thought_signature`. Investigation: signatures arrive as **bytes** (224),
+   but `ToolCall.thought_signature` was typed `str | None` → pydantic
+   `ValidationError` on EVERY real call, swallowed by `except: pass` → the
+   model "never called tools" for a whole debugging stretch. Fix: capture →
+   base64 (JSON-safe for events/cache) → decode to bytes on replay; helpers
+   `_encode_signature` / `_decode_signature`. `Part.thought_signature`
+   confirmed `Optional[bytes]` against the SDK.
+2. **Why:** Gemini 3.x mandates echoing the signature on function-call replay;
+   without it no multi-turn run survives turn 2. Base64 keeps the event log and
+   response cache JSON-serializable.
+3. **Theory:** Two lessons: (a) check wire types empirically (`type()` on the
+   live part), never assume str; (b) bare `except: pass` around parsing converts
+   a loud validation error into a silent "model is dumb" misdiagnosis. (Kept the
+   broad except — the harness must not crash on weird responses — but the guide
+   records the cost.)
+
+### Step 21d — Fix 3: the thought-divert bug (the cruelest one)
+
+1. **What:** After adding thought-block replay, ALL calls vanished again. Root
+   cause: the parser filed any part *with a signature* as a thought block and
+   `continue`d — including `functionCall` parts, whose signatures then never
+   became `ToolCall`s. Proved with a wire spy (response HAS the call, parse
+   yields nothing) after exonerating temperature, prompt length, workspace,
+   system handling (12/12 sweep: absent/folded/native all fine), call order,
+   and rate limits via A/B probes. Fix: `function_call` parts always become
+   `ToolCall`s (signature rides the call); only signature blocks with NO call
+   and NO text become standalone thought blocks. Regression test
+   `test_from_response_keeps_signed_calls` fabricates the exact shape. Docs
+   (`thinking#signatures`) confirmed: resend thought blocks exactly.
+2. **Why:** The load-bearing bug — nearly every real call carries a signature,
+   so nearly every call was dropped. The A/B probes are the method story: when
+   request bytes diff as *identical* yet outcomes differ, suspect your own
+   parser — capture wire bytes, then trace parsing stepwise.
+3. **Theory:** Order parser branches by specificity (call first, then thought,
+   then text) — a broad thought-catch-all above the call branch eats the calls.
+   Also adopted (proven harmless, kept minimal): native `system_instruction`,
+   `MAX_EMPTY_RETRIES=3` + `stopped_by="empty"` for transient model-side
+   empties (below).
+
+### Step 21e — Server-side flakiness advisory (3.8-flash, today)
+
+1. **What:** Throughout the session, tools-attached calls flapped between
+   working and empty-`STOP` stretches (bare-text calls always fine; 8/8 rapid
+   bursts fine in good windows; `thinking_level` LOW tested — works, but so
+   does default once the window passes, so LOW is NOT the fix and was not
+   adopted). Ruled out as causes: temperature, prompt length, workspace, system
+   handling, call order, rate degradation. Harness posture: empty turns retried
+   3× within budget, then honest `stopped_by="empty"`.
+2. **Why:** B0 matrices must report `empty`-stop rates alongside pass rates, or
+   model-side flakiness will read as harness failure. Retrying empties (constant
+   across B0..B8) keeps the baseline measurable without biasing comparisons.
+3. **Theory:** Distinguish transport bugs (deterministic, A/B-provable) from
+   capacity flakiness (time-varying, identical-request flips). Never "fix" the
+   harness for the latter beyond graceful handling — and never mistake the
+   former for model stupidity. `thinking_budget` stays unset (default medium).
+
+### Step 21f — Verified live run (session `aa27b6b7ea96`)
+
+1. **What:** `lever run --repo bug-repo`: 4 iterations, `stopped_by=model`:
+   `read_file(add.py)` → saw `a - b` → `edit_file` exact match applied
+   (unified diff in result) → `bash(python add.py)` exit 0 ("sum of 10 and 5
+   is: 15") → correct summary. Workspace diff confirms the one-line fix. Full
+   suite after all changes: **22 green** (incl. 30-task reference gate).
+   Committed with Jishnu's env-model refactor (model from `LEVER_MODEL`;
+   `provider.model` in events/cache; new env-model test).
+2. **Why:** The Phase-1 acceptance with a REAL model, not a scripted one — the
+   milestone the interlude served. B0 did not write a regression-test file
+   (naive baseline, no B6 verify loop — honest B0 scope).
+3. **Theory:** The eval story has its first live data point: transport proven,
+   baseline behavior observed (reads → edits → runs → summarizes). Everything
+   from here (B1..B8 deltas) is measured against runs shaped exactly like this.
+
+---
+
 ## Summary: File Creation Order (For Video Editing)
 
 | Step | File(s) | Phase |
@@ -263,6 +381,7 @@
 | 20c | 30× `evals/tasks/<id>/{repo,task.md,hidden_tests,meta.json,solution.patch}`, `evals/SPLIT.md` | 2 |
 | 20d | `evals/validate_tasks.py`, `scripts/regen_patches.py`, `tests/test_tasks_valid.py` | 2 |
 | 20e | `evals/Dockerfile`, `evals/README.md` | 2 |
+| 21a–f | `providers/gemini.py` (native parts, signatures, thought replay), `core/loop.py` (structured calls, empty retry), `tools/bash.py` (cmd hint), `bug-repo/` fixture | live |
 
 ---
 
@@ -290,6 +409,9 @@
 | 18 | Never hand-write diffs; generate them | `scripts/regen_patches.py` | `git apply` rc=0 with wrong hunk counts silently truncates files |
 | 19 | `newline="\n"` for byte-sensitive output | `scripts/regen_patches.py` | Windows text mode turns `\n` into `\r\n`, corrupting patches |
 | 20 | Lint excludes task repos | `pyproject.toml:extend-exclude` | The bugs ARE the tasks — the linter must not "fix" the eval |
+| 21 | Native function parts + signature echo | `providers/gemini.py`, `core/loop.py` | Prose history gets parroted; 3.x 400s without byte signatures |
+| 22 | Parser specificity order (call→thought→text) | `providers/gemini.py:_from_response` | A broad catch-all above the call branch eats the calls |
+| 23 | Empty-turn retry + `stopped_by="empty"` | `core/loop.py` | Model-side flakes must read as flakes, not as harness failure |
 
 ---
 

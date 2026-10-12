@@ -16,9 +16,44 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from .base import ModelResponse, ToolCall
 
 
+def _encode_signature(raw: Any) -> str | None:
+    """Thought signatures arrive as bytes; store base64 so history,
+    events, and cache stay JSON-serializable."""
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        import base64
+
+        return base64.b64encode(raw).decode("ascii")
+    return str(raw)
+
+
+def _decode_signature(stored: Any) -> bytes | None:
+    if not stored:
+        return None
+    if isinstance(stored, bytes):
+        return stored
+    import base64
+
+    try:
+        return base64.b64decode(str(stored))
+    except Exception:
+        return None
+
+
+def _extract_system(messages: list[dict[str, Any]]) -> str | None:
+    """First system message wins; the loop always sends exactly one."""
+    for m in messages:
+        if m.get("role") == "system" and str(m.get("content", "")):
+            return str(m["content"])
+    return None
+
+
 class GeminiProvider:
-    def __init__(self, model: str | None = None, api_key: str | None = None) -> None:
-        self.model = model or os.getenv("LEVER_MODEL", "gemini-2.5-flash")
+    def __init__(self, api_key: str | None = None) -> None:
+        self.model = os.getenv("LEVER_MODEL", "")
+        if not self.model:
+            raise ValueError("LEVER_MODEL is not set (see .env.example)")
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY is not set (see .env.example)")
@@ -48,17 +83,21 @@ class GeminiProvider:
         contents = self._to_contents(messages)
         tool_config = self._to_tools(tools)
         temperature = float(getattr(config, "temperature", 0.2) or 0.2)
+        system_text = _extract_system(messages)
 
         # google-genai SDK is sync; run in thread to avoid blocking the loop.
         import asyncio
 
         def _call() -> Any:
             kwargs: dict[str, Any] = {
-                "model": getattr(config, "model", self.model) or self.model,
+                "model": self.model,
                 "contents": contents,
             }
             # Only pass generation config we are sure about.
-            kwargs["config"] = {"temperature": temperature}
+            cfg: dict[str, Any] = {"temperature": temperature}
+            if system_text:
+                cfg["system_instruction"] = system_text
+            kwargs["config"] = cfg
             if tool_config:
                 tools_cfg = kwargs["config"]
                 assert isinstance(tools_cfg, dict)
@@ -70,34 +109,59 @@ class GeminiProvider:
 
     # ---- conversion helpers (the quirk-containment zone) ----
 
-    def _to_contents(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Accept our plain {role, content} dicts; pass through otherwise."""
-        out: list[dict[str, Any]] = []
+    def _to_contents(self, messages: list[dict[str, Any]]) -> list[Any]:
+        """Render our plain dicts as native SDK parts.
+
+        System messages are SKIPPED here — generate() sends them as native
+        `system_instruction` instead (folding them into user turns confused
+        tool elicitation). Assistant turns with `tool_calls` become model
+        content with real FunctionCall parts; tool results become user content
+        with real FunctionResponse parts. This pairing is what keeps multi-turn
+        function calling alive — prose framings get parroted, parts get
+        continued (proven by the failed-then-fixed live runs).
+        """
+        from google.genai import types
+
+        out: list[Any] = []
         for m in messages:
             role = m.get("role", "user")
             content = m.get("content", "")
             if role == "system":
-                # google-genai prefers system_instruction; fold into user turn
-                # to keep history replay simple and multi-turn safe.
-                out.append({"role": "user", "parts": [{"text": f"[system] {content}"}]})
+                continue
             elif role in ("user", "model", "assistant"):
                 r = "model" if role in ("model", "assistant") else "user"
-                out.append({"role": r, "parts": [{"text": str(content)}]})
+                parts: list[Any] = []
+                if str(content):
+                    parts.append(types.Part(text=str(content)))
+                # Thought blocks replay EXACTLY and FIRST (reasoning continuity).
+                for block in m.get("thought_blocks") or []:
+                    sig = _decode_signature(block.get("thought_signature"))
+                    parts.append(types.Part(
+                        text=block.get("text"),
+                        thought=bool(block.get("thought", True)),
+                        thought_signature=sig,
+                    ))
+                if r == "model":
+                    for call in m.get("tool_calls") or []:
+                        fc_part = types.Part.from_function_call(
+                            name=call.get("name", ""),
+                            args=dict(call.get("args", {}) or {}),
+                        )
+                        # Echo the thought signature verbatim (Gemini 3.x 400s
+                        # without it). Never invent one when absent.
+                        sig = _decode_signature(call.get("thought_signature"))
+                        if sig is not None:
+                            fc_part.thought_signature = sig
+                        parts.append(fc_part)
+                out.append({"role": r, "parts": parts or [{"text": ""}]})
             elif role == "tool":
-                # Tool results: keep as user parts with explicit framing so the
-                # model can continue multi-turn function calling.
-                out.append(
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "text": (
-                                    f"[tool result {m.get('name', '')}]: {content}"
-                                )
-                            }
-                        ],
-                    }
-                )
+                out.append({
+                    "role": "user",
+                    "parts": [types.Part.from_function_response(
+                        name=str(m.get("name", "")),
+                        response={"result": str(content)},
+                    )],
+                })
             else:
                 out.append({"role": "user", "parts": [{"text": str(content)}]})
         return out
@@ -124,26 +188,58 @@ class GeminiProvider:
     def _from_response(self, resp: Any) -> ModelResponse:
         text_parts: list[str] = []
         calls: list[ToolCall] = []
+        thoughts: list[dict[str, Any]] = []
         try:
             for cand in getattr(resp, "candidates", []) or []:
                 for part in getattr(getattr(cand, "content", None), "parts", []) or []:
-                    t = getattr(part, "text", None)
-                    if t:
-                        text_parts.append(t)
+                    sig = _encode_signature(
+                        getattr(part, "thought_signature", None)
+                    )
                     fc = getattr(part, "function_call", None)
                     if fc is not None:
+                        # Function call: the signature rides ON the call part.
+                        # (A signed call is NOT a standalone thought block —
+                        # filing it as one drops the call entirely.)
                         calls.append(
                             ToolCall(
                                 name=getattr(fc, "name", ""),
                                 args=dict(getattr(fc, "args", {}) or {}),
+                                thought_signature=sig,
                             )
                         )
+                        continue
+                    t = getattr(part, "text", None)
+                    if sig and not t:
+                        # Pure signature block (no text, no call): replay
+                        # exactly or reasoning continuity breaks.
+                        thoughts.append({
+                            "text": None,
+                            "thought": bool(getattr(part, "thought", None)),
+                            "thought_signature": sig,
+                        })
+                        continue
+                    if t:
+                        text_parts.append(t)
+                        if sig:
+                            # Text carrying a signature: remember it for exact
+                            # replay alongside the display text.
+                            thoughts.append({
+                                "text": t,
+                                "thought": bool(getattr(part, "thought", None)),
+                                "thought_signature": sig,
+                            })
         except Exception:
             pass
-        # Fallback: some SDK versions expose .text directly.
+        # Fallback: some SDK versions expose .text directly. Suppress the
+        # "non-text parts" warning — we already walked parts above, and this
+        # path only runs when no text parts were found (e.g. call-only turns).
         if not text_parts:
             try:
-                t = getattr(resp, "text", "")
+                import warnings
+
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    t = getattr(resp, "text", "")
                 if t:
                     text_parts.append(str(t))
             except Exception:
@@ -154,4 +250,5 @@ class GeminiProvider:
             tool_calls=calls,
             input_tokens=int(getattr(usage, "prompt_token_count", 0) or 0),
             output_tokens=int(getattr(usage, "candidates_token_count", 0) or 0),
+            thought_blocks=thoughts,
         )

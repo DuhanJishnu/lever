@@ -140,8 +140,8 @@ async def run_one(task: dict, config: dict, config_name: str, seed: int,
         provider_name = "fake"
     else:
         from lever.providers.gemini import GeminiProvider
-        provider = GeminiProvider(model=cfg.model)
-        provider_name = cfg.model
+        provider = GeminiProvider()
+        provider_name = provider.model
 
     store = EventStore(work_root / "events.db")
     session = Session(source=run_dir)

@@ -42,7 +42,10 @@ def make_bash_tool(root: Path) -> Tool:
 
     return Tool(
         name="bash",
-        description="Run a shell command with the workspace as working directory. Returns exit code + output. Has a timeout (default 30s).",
+        description="Run a shell command with the workspace as working directory. "
+        "Returns exit code + output. Has a timeout (default 30s). "
+        "NOTE: the shell is Windows cmd.exe — chain commands with && or || "
+        "(never `;`), use `dir` instead of `ls -la`, and `python` for Python.",
         parameters={
             "type": "object",
             "properties": {

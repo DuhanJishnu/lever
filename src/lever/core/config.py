@@ -6,7 +6,6 @@ from pydantic import BaseModel
 
 
 class HarnessConfig(BaseModel):
-    model: str = "gemini-2.5-flash"
     temperature: float = 0.2
     thinking_budget: int | None = None  # keep IDENTICAL across ablations
     max_steps: int = 40

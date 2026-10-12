@@ -14,7 +14,7 @@ uv sync --group dev
 
 # 2. Configure key
 Copy-Item .env.example .env
-# edit .env -> GEMINI_API_KEY=...
+# edit .env -> GEMINI_API_KEY=... and set LEVER_MODEL
 
 # 3. Acceptance test (say-hi through provider, logged as events, 2nd run hits cache)
 uv run python scripts/say_hi.py --prompt "say hi" --db .lever_events.db

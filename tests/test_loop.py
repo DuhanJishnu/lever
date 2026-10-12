@@ -71,6 +71,58 @@ async def test_loop_max_steps_guard(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_loop_retries_empty_turns(tmp_path):
+    """Empty turns (no text, no calls) are retried, not accepted as 'done'."""
+    prov = FakeProvider([
+        ModelResponse(text="", tool_calls=[]),
+        ModelResponse(text="", tool_calls=[]),
+        ModelResponse(text="finally"),
+    ])
+    store = EventStore(tmp_path / "e.db")
+    session = Session(source=tmp_path)
+    session.open(base_dir=tmp_path / "ws")
+    result = await run_loop(provider=prov, session=session, task="t",
+                            config=HarnessConfig.b0(), store=store, cache=None)
+    assert result.answer == "finally" and result.stopped_by == "model"
+    assert len(prov.calls) == 3  # 2 empties retried, 3rd accepted
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_loop_gives_up_after_repeated_empties(tmp_path):
+    prov = FakeProvider([ModelResponse(text="", tool_calls=[])])
+    store = EventStore(tmp_path / "e.db")
+    session = Session(source=tmp_path)
+    session.open(base_dir=tmp_path / "ws")
+    result = await run_loop(provider=prov, session=session, task="t",
+                            config=HarnessConfig.b0(), store=store, cache=None)
+    assert result.stopped_by == "empty" and result.answer == "(no response)"
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_loop_records_structured_tool_calls(tmp_path):
+    """History must carry native tool_calls (never "[calls: ...]" prose)."""
+    prov = FakeProvider([
+        ModelResponse(text="", tool_calls=[ToolCall(name="bash", args={"cmd": "echo hi"})]),
+        ModelResponse(text="done"),
+    ])
+    store = EventStore(tmp_path / "e.db")
+    session = Session(source=tmp_path)
+    session.open(base_dir=tmp_path / "ws")
+    await run_loop(provider=prov, session=session, task="t",
+                   config=HarnessConfig.b0(), store=store, cache=None)
+    second_input = prov.calls[1]["messages"]
+    assistant_turns = [m for m in second_input if m.get("role") == "assistant"]
+    assert assistant_turns
+    assert assistant_turns[0].get("tool_calls") == [
+        {"name": "bash", "args": {"cmd": "echo hi"}, "thought_signature": None}
+    ]
+    assert "[calls:" not in str(second_input)
+    store.close()
+
+
+@pytest.mark.asyncio
 async def test_e2e_toy_bug_fixed(tmp_path):
     """Acceptance: scripted agent reads, edits, tests a one-line bug end-to-end."""
     repo = tmp_path / "repo"

@@ -36,7 +36,10 @@ async def main() -> None:
     config = HarnessConfig()
     messages = [{"role": "user", "content": args.prompt}]
     tools: list[dict] = []
-    key = cache_key(config.model, messages, tools, config)
+    model_name = "fake" if use_fake else os.getenv("LEVER_MODEL", "")
+    if not model_name:
+        raise ValueError("LEVER_MODEL is not set (see .env.example)")
+    key = cache_key(model_name, messages, tools, config)
     cache = ResponseCache(args.cache)
 
     session_id = args.session or new_session_id()
@@ -53,7 +56,7 @@ async def main() -> None:
     else:
         store.append(
             Event(session_id=session_id, seq=0, type="model_request",
-                  data={"messages": messages, "model": config.model})
+                  data={"messages": messages, "model": model_name})
         )
         if use_fake:
             from lever.providers.fake import FakeProvider
@@ -63,7 +66,7 @@ async def main() -> None:
         else:
             from lever.providers.gemini import GeminiProvider
 
-            provider = GeminiProvider(model=config.model)  # type: ignore[assignment]
+            provider = GeminiProvider()  # type: ignore[assignment]
         resp = await provider.generate(messages, tools, config)  # type: ignore[union-attr]
         cache.put(key, resp.model_dump())
         print(f"CACHE MISS key={key[:12]} session={session_id}")
