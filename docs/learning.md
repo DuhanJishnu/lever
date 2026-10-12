@@ -190,6 +190,42 @@
 
 ---
 
+## Phase 2: Eval Harness (12 Oct 2026)
+
+### Step 20a — `evals/runner.py`: Resumable, Parallel, Two-Backend Runner
+
+1. **What:** `list_tasks()` (validates meta id/category + required files), `prepare_workspace()` (repo only), `stage_hidden()` (hidden tests copied at grade time + auto `conftest.py` fixing `sys.path`), `grade_local` / `grade_docker` (mount a copy, `--network none`, `lever-eval` image), `run_one()` (agent run → stage hidden → grade → full metrics dict: pass, tokens in/out, steps, wall time, tool-error/edit-failure/compaction counts, context sizes, `stopped_by`, `fell_for_trap`, diff stat, session id, `cost_usd: null`), driver with `--tasks/--config/--seeds/--backend/--jobs/--out/--dry-run/--redo`, resumable skip of finished (task, config, seed).
+2. **Why:** The measuring stick everything else stands on. Grade-time staging honors "hidden tests NEVER shown to the agent" even on the local backend; resumability + semaphore make overnight 90-run matrices survivable; `cost` stays null without official rates (tokens are truth, prices are guesses).
+3. **Theory:** Evals 101: fixed dataset + hidden grading + JSONL results. Counting error classes from the event log (not prose) is what makes edit-failure and stuck-run rates honest secondary metrics. `--dry-run` with FakeProvider proves plumbing while advertising pass=0 — a smoke test, never a result.
+
+### Step 20b — `evals/analyze.py`: pass@1, Bootstrap CIs, Paired Diffs, Charts
+
+1. **What:** Per-task rates across seeds → config mean; stdlib-only bootstrap (2000 resamples) 95% CIs; paired per-task deltas vs previous config with CIs; trap rate + stopped-by breakdown in the table; matplotlib bar-with-CI and task×config heatmap PNGs; `--summary-json` for the README pipeline.
+2. **Why:** With n=15 held-out tasks, sub-~10pt deltas are noise — CIs force that honesty, and paired diffs (same tasks) are the only fair config-vs-config claim.
+3. **Theory:** Bootstrap = resample tasks with replacement, recompute the mean 2000×, take the 2.5/97.5 percentiles. No normality assumption, no scipy needed. Heatmaps reveal *which* tasks move (a config can win on average while breaking specific categories — the ladder needs that detail).
+
+### Step 20c — 30 Tasks + `SPLIT.md` + `solution.patch` per Task
+
+1. **What:** 10 bugfix / 8 feature / 5 refactor / 4 multi-file / 3 write-tests, each with repo + issue-style `task.md` + hidden tests + `meta.json` (+ `trap` on 8: buggy-pattern remnants like `sum(range(n))`, `old_name`). Refactor tasks carry structural asserts (`hasattr`, `is_dataclass`, no `.append`) so they FAIL pre-patch — behavior-only checks would pass on the smelly code and be worthless. Write-tests tasks grade via hidden `grade.py` (file exists + ≥N tests + all pass). Split: dev b01-05/f01-04/r01-03/m01-02/t01, held-out the rest, decided before any tuning.
+2. **Why:** "Mostly Python, small repos, own mutations" = fast, cheap, uncontaminated. Structural asserts are the key insight: a refactor task must test the *refactor*, not just behavior. Traps measure steering (did the fix actually land?).
+3. **Theory:** Trap cases: the obvious answer is often wrong; `fell_for_trap` distinguishes "model can't" from "harness didn't steer". Held-out discipline: tuning against the final set inflates the headline number — the split is written down *before* the first real run so nobody can quietly move the line.
+
+### Step 20d — `evals/validate_tasks.py` + the Patch Autopsy (Video Gold)
+
+1. **What:** Per task: stage → grade (must FAIL) → `git apply solution.patch` (must apply) → grade 3× (must PASS every time — flakiness check). First full run: **20/30**. Root causes, in order: (1) hand-written unified-diff hunk headers with wrong line counts — `git apply` exited 0 yet **silently truncated files** (missing `return` → `None` returns, `IndentationError`, dropped tests); (2) generator v1 passed `a`/`b` as difflib labels (git: "inconsistent old filename"); (3) generator v2 used `lineterm=""`, collapsing the body so header-slicing deleted everything; (4) generator v3 wrote CRLF on Windows (Python text-mode `\n`→`\r\n`), git read `\r` as trailing whitespace/content mismatch. Fix: `newline="\n"` + correct labels + default lineterm. Reran: **30/30**. Repair script kept at `scripts/regen_patches.py`.
+2. **Why:** "Every task must FAIL then PASS with a reference solution" is the credibility of the whole eval — a task that passes pre-patch can't measure anything, and a broken reference blocks CI. Keeping the repair script preserves the evidence trail.
+3. **Theory:** Three lessons: (a) never hand-write diffs — generate them (difflib is correct by construction, humans miscount); (b) exit-code 0 ≠ correct — only the fail→pass behavior check caught the truncation, which is why validation tests behavior and not application; (c) Windows text-mode translation is a real correctness hazard for patch files — `newline="\n"` is the fix, and it belongs in every file-writing script that produces byte-sensitive artifacts.
+
+### Step 20e — `evals/Dockerfile`, `configs.json`, `README.md`, CI Test
+
+1. **What:** `Dockerfile` (python:3.12-slim + pytest = `lever-eval` image; no network at grade time); `configs.json` (the B0 baseline as data — the ladder B1..B8 will append configs here); `evals/README.md` (the 4 commands: validate → dry-run → real run → analyze); `tests/test_tasks_valid.py` (inventory: 30 tasks, exact category counts, SPLIT coverage, ≥6 traps + full reference gate). Ruff now excludes `evals/tasks` (task repos *intentionally* contain bugs — linting them would "fix" the eval; B006 flagged b02's mutable default — the bug IS the task). Dry-run on b01/f01/t01 → table (`pass@1 0.00`, trap rate 1.0 — correct: FakeProvider changes nothing) + both PNG charts.
+2. **Why:** B0-as-data makes ablations config diffs, not code forks. The trap-rate-1.0 dry-run is a negative control: the metric correctly reports "nothing fixed" when the agent does nothing — metrics that can't show failure can't show success either.
+3. **Theory:** Config-as-data is the ablation ladder made concrete (Step 8's HarnessConfig theory, now on disk). Full gates: ruff clean, mypy strict clean, 16 tests green in ~65s.
+
+**Phase 2 Exit State:** Measuring stick built and validated; pipeline proven end-to-end with $0 spent. NOT yet done (needs keyed runs): the real B0 30×3 matrix, difficulty calibration (is B0 at 20–40%?), `docker build -t lever-eval` once Docker Desktop lands. Next: Phase 3 ladder (B1 tolerant edit first).
+
+---
+
 ## Summary: File Creation Order (For Video Editing)
 
 | Step | File(s) | Phase |
@@ -222,6 +258,11 @@
 | 19g | `src/lever/core/loop.py` | 1 |
 | 19h | `src/lever/cli.py` | 1 |
 | 19i | `tests/test_tools.py`, `test_loop.py` | 1 |
+| 20a | `evals/runner.py`, `evals/configs.json` | 2 |
+| 20b | `evals/analyze.py` | 2 |
+| 20c | 30× `evals/tasks/<id>/{repo,task.md,hidden_tests,meta.json,solution.patch}`, `evals/SPLIT.md` | 2 |
+| 20d | `evals/validate_tasks.py`, `scripts/regen_patches.py`, `tests/test_tasks_valid.py` | 2 |
+| 20e | `evals/Dockerfile`, `evals/README.md` | 2 |
 
 ---
 
@@ -242,13 +283,19 @@
 | 11 | `stopped_by` classification | `core/loop.py:LoopResult` | Diagnoses gave-up vs guardrail-stopped vs max_steps |
 | 12 | Copy workspace + git baseline | `core/session.py` | Clean diffs on Windows without worktree quirks |
 | 13 | Stdout=JSONL, stderr=summary | `cli.py` | Unix contract for composable pipelines |
+| 14 | Hidden tests staged at grade time | `evals/runner.py:stage_hidden` | Agent never sees grading material, even locally |
+| 15 | Bootstrap CIs + paired diffs | `evals/analyze.py` | Sub-10pt deltas on 15 tasks are noise; paired diffs are the only fair claim |
+| 16 | Trap patterns measure steering | `meta.json:trap`, runner `_trap_check` | Distinguishes "model can't" from "harness didn't steer" |
+| 17 | Refactor tasks need structural asserts | `evals/tasks/r*/hidden_tests` | Behavior-only checks pass on smelly code — worthless as evals |
+| 18 | Never hand-write diffs; generate them | `scripts/regen_patches.py` | `git apply` rc=0 with wrong hunk counts silently truncates files |
+| 19 | `newline="\n"` for byte-sensitive output | `scripts/regen_patches.py` | Windows text mode turns `\n` into `\r\n`, corrupting patches |
+| 20 | Lint excludes task repos | `pyproject.toml:extend-exclude` | The bugs ARE the tasks — the linter must not "fix" the eval |
 
 ---
 
 ## Next Phases (Not Yet Implemented — For Reference)
 
-- **Phase 2:** Eval harness (30 tasks, Docker runner, bootstrap CIs)
-- **Phase 3:** Ablation ladder B1–B8 (one feature at a time, measure delta)
+- **Phase 3:** Ablation ladder B1–B8 (one feature at a time, measure delta) — B1 tolerant edit first
 - **Phase 4:** Policy layer + Web UI (FastAPI + React, context inspector, eval dashboard)
 - **Phase 5:** Credibility run (held-out tasks, SWE-bench subset, results.md)
 - **Phase 6:** MCP client, event-stream adapter, upstream PR, README, video, blog, v1.0 release
