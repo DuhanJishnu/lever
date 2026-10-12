@@ -255,3 +255,35 @@ you show on screen.
 ---
 
 ## Phase 1: Baseline B0 (starts next — append Step 18+ here)
+
+### Step 18 — Learned from `harness_engineering_distilled.md`, updated the plan (12 Oct 2026)
+
+1. **What:** Read the full distilled doc (880 lines, from the mini-ai-harness reference:
+   eval harness vs agent harness, guardrails-vs-verify, DI tools, hooks, trace-everything).
+   Most of it confirmed our plan (Provider protocol = their model-agnostic string swap,
+   event log = their trace, policy layer = their guardrails). Five ideas were genuinely
+   new, so updated `Lever_Implementation_Plan.md`: (a) Phase 1 tools must be built via a
+   `create_tools(session)` factory bound to the session — no global environment imports;
+   (b) agent loop spec now records per-iteration context size + `stopped_by`
+   (`model`/`guardrail`/`max_steps`) with try/finally session lifecycle and fresh context
+   per task; (c) B6 verify loop gained trace-based semantic checks + tool hooks
+   (verify the trace, not the model's prose); (d) B8 loop guard rewritten as composable
+   `guard(state)` functions run before each model call; (e) Phase 2 tasks gained optional
+   `trap` fields in `meta.json` + `fell_for_trap`/trap-rate metrics, and secondary metrics
+   gained stopped-by breakdown. Source credited in teaching guide; doc stays at repo root.
+2. **Why:** The distilled doc's core thesis — "whenever an agent makes a mistake, engineer
+   the environment so it won't make it again" — is exactly Lever's ablation ladder, but it
+   named mechanisms our plan left vague (who owns the environment lifecycle? how do tools
+   get the workspace? what stops the loop besides `max_steps`?). Adopting its concrete
+   patterns now prevents refactors later: DI tools make parallel eval runs possible,
+   `stopped_by` makes failure analysis (Phase 5) diagnosable, trap metrics prove steering.
+3. **Theory:** Five patterns for video: (i) **Dependency injection for tools** — binding
+   tools to a session instance (vs global imports) enables testing, concurrency, cleanup;
+   (ii) **Guardrails (structural) vs verify (semantic)** — max-iterations/context/budget
+   can't be bypassed, while post-loop checks catch hallucinations like unverified
+   "tests pass" claims; (iii) **Hooks** — tools emit success signals, harness subscribes,
+   separating execution from the definition of success; (iv) **Trace everything** —
+   per-iteration tool events + context size is the debugging interface and the raw material
+   for eval analysis; (v) **Trap cases** — designing tasks where the obvious answer is
+   wrong (with `fell_for_trap` tracking) measures whether the harness steers reasoning,
+   the same way the reference's Sydney-vs-Canberra case exposes confident hallucinations.

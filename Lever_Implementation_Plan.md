@@ -208,17 +208,28 @@ Pitfalls: leaking your API key into git (use `.env` + `.gitignore`); forgetting 
 
 Tasks
 - [ ] **Tools** (`tools/`): `read_file(path)`, `write_file(path, content)`, `edit_file(path, old_str, new_str)` (exact match only for now), `grep(pattern, path)`, `bash(cmd, timeout)`. Define JSON schemas; give each tool a clear description.
+- [ ] **Tools are bound to the session, not globals**: factory `create_tools(session)` builds the registry from that session's workspace/sandbox handle (dependency injection). Tools never import environment state directly. This enables parallel eval runs, unit-testing tools against a temp dir, and clean lifecycle management.
 - [ ] **Path safety**: all paths resolved inside the workspace root; reject `..` escapes.
 - [ ] **Agent loop** (`core/loop.py`):
   ```
-  messages = [system, user_task]
-  for step in range(max_steps):
-      resp = provider.generate(messages, tools)
-      emit(model_response)
-      if no tool calls: break          # model says done
-      for call in resp.tool_calls:
-          result = tools.run(call)     # emit tool_call / tool_result
-          messages.append(tool_result)
+  session.open()                          # harness owns lifecycle; try/finally close
+  try:
+      tools = create_tools(session)       # bound to THIS session's environment
+      messages = fresh_context(task)      # no history from previous tasks (isolation)
+      trace = []
+      for step in range(max_steps):
+          guard = guardrails.check(state) # structural checks run BEFORE each model call
+          if guard.stop: break            # record stopped_by="guardrail"
+          resp = provider.generate(messages, tools)
+          emit(model_response)
+          track context_size per iteration (for trace + context-rot analysis)
+          if no tool calls: break         # stopped_by="model"
+          for call in resp.tool_calls:
+              result = tools.run(call)    # emit tool_call / tool_result
+              messages.append(tool_result)
+      # stopped_by is always recorded: "model" | "guardrail" | "max_steps"
+  finally:
+      session.close()                     # ALWAYS, even on error
   ```
 - [ ] **Session**: workspace = a git worktree/copy of the repo; session id; all steps emit events.
 - [ ] **Headless CLI** (Typer): `lever run --repo ./path --task "fix failing test" --config b0.yaml`.
@@ -245,14 +256,15 @@ Task design (30 tasks)
     repo/            # starting code (small: 5-40 files)
     task.md          # issue-style description (what the user would say)
     hidden_tests/    # NEVER shown to the agent; copied in only at grading time
-    meta.json        # {category, difficulty, test_cmd, timeout}
+    meta.json        # {category, difficulty, test_cmd, timeout, trap?}
   ```
+- **Trap cases**: for a subset of tasks, record in `meta.json` the `"trap"` — the plausible-but-wrong answer a weak model typically gives (e.g. editing the wrong file, Sydney-instead-of-Canberra-style misdirection). The runner reports `fell_for_trap` per run; the analysis reports trap rate per config. A config that reduces trap rate is genuinely steering the model, not just getting lucky.
 - **Avoid contamination**: don't use famous GitHub issues verbatim; write your own repos or mutate small OSS code so the model can't recall solutions.
 - **Dev/held-out split**: 15 dev tasks (you may look at failures and tune against these), 15 held-out (touch ONLY for final reports). Decide the split now and write it in `evals/SPLIT.md`.
 
 Runner
 - [ ] `runner.py`: for each (task, config, seed): start Docker container, copy repo, run agent, copy in hidden tests, run `test_cmd`, record pass/fail.
-- [ ] Record per run: pass, tokens in/out, steps, wall time, estimated cost, tool-error count, edit-failure count, compaction count, final diff, session id.
+- [ ] Record per run: pass, tokens in/out, steps, wall time, estimated cost, tool-error count, edit-failure count, compaction count, final diff, session id, **stopped_by** (`model`/`guardrail`/`max_steps`), **trap rate** (on trap-tagged tasks), per-iteration context sizes.
 - [ ] Append results as JSONL. Make the runner **resumable** (skip finished runs) and **parallel** (a small asyncio semaphore; respect API rate limits).
 - [ ] Validate tasks: every task must FAIL on the starting repo and PASS with a reference solution. Store `solution.patch` and check it in CI.
 
@@ -324,6 +336,8 @@ Matching cascade, stop at the first success:
 - Feed back a *trimmed* failure report (first failing test + last ~40 lines); let the model continue. Cap at 3 verify rounds.
 - If no test command exists, run a syntax/lint check instead.
 - Careful: hidden tests are for grading only. The verify loop must use tests the agent can see (the repo's own tests, or ones the agent wrote).
+- **Trace-based semantic checks** (beyond pass/fail): inspect the run trace before accepting "done" — e.g. did any iteration invoke the test command? Do files referenced in the final answer exist in the workspace? Unverified claims ("tests pass" with no test run in trace) are sent back to the model as feedback. This is the **guardrails-vs-verify split**: guardrails enforce structure (can't be bypassed), verify checks meaning (catches hallucinations).
+- **Tool hooks**: critical tools emit success signals the harness subscribes to (e.g. edit tool reports files changed, test tool reports pass/fail) rather than trusting the model's prose summary. Verification reads hooks + trace, not the chat text.
 
 #### 3.7 Planner prompt and scratchpad (B7) `[S1, S7, S17]`
 - Versioned prompts in `prompts/vN/*.md` (system prompt split into sections: role, workflow, tool-use rules, edit rules, done criteria).
@@ -333,6 +347,11 @@ Matching cascade, stop at the first success:
 - Use the prompt registry to A/B prompt versions; log `prompt_version` in every run.
 
 #### 3.8 Loop guard (B8) `[S3, S16]`
+- **Composable guardrail functions**: each guard is a small function
+  `guard(state) -> continue | stop(reason)` (state = iterations, messages/context size,
+  tool-call history, cost so far). Guards compose: run all before each model call,
+  first `stop` wins and is recorded as `stopped_by`. Ship at minimum: `max_iterations`,
+  `max_context_messages`, `no_repeated_failed_calls(3)`, `budget_exceeded`, `time_limit`.
 - Hash `(tool, normalized args)`; if the same call repeats 3×, inject a nudge ("You already did this. Try a different approach.").
 - After 2 nudges: force a re-plan turn (summarize what failed, propose new approach).
 - Hard stop at `max_steps` with a clean failure event.
@@ -399,7 +418,7 @@ Acceptance test: you can state the headline claim from section 1 with real numbe
 ## 7. Eval methodology (read before Phase 2)
 
 - **Primary metric:** pass@1 averaged over 3 seeds. Hidden tests decide pass/fail; no partial credit.
-- **Secondary:** tokens/task, steps/task, wall time, estimated cost, edit-failure rate, tool-error rate, stuck-run rate.
+- **Secondary:** tokens/task, steps/task, wall time, estimated cost, edit-failure rate, tool-error rate, stuck-run rate, **trap rate** (on trap-tagged tasks), **stopped-by breakdown** (model/guardrail/max_steps — diagnoses whether failures are giving-up vs guardrail-stopped).
 - **Statistics:** bootstrap 95% CIs over tasks; for config-vs-config claims, use a *paired* analysis (same tasks) `[S22]`. With only 15 held-out tasks, differences under ~10 points are probably noise. Say so honestly.
 - **Fairness:** same model, temperature, thinking budget, max steps, token cap on tool output *definition* (B0 has a coarse one), and same Docker image across configs.
 - **Seeds:** Gemini isn't fully deterministic even at low temperature, so run each (task, config) 3 times and report the mean.
