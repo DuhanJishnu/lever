@@ -1,0 +1,1 @@
+{"category": "bugfix", "difficulty": "medium", "id": "b08", "test_cmd": "python -m pytest -q", "timeout": 120}

@@ -1,0 +1,7 @@
+diff --git a/topk.py b/topk.py
+--- a/topk.py
++++ b/topk.py
+@@ -1,2 +1,2 @@
+ def top_k(nums, k):
+-    raise NotImplementedError
++    return sorted(nums, reverse=True)[:max(k, 0)]

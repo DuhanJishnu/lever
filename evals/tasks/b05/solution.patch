@@ -1,0 +1,10 @@
+diff --git a/count.py b/count.py
+--- a/count.py
++++ b/count.py
+@@ -1,5 +1,5 @@
+ def count_words(words):
+     freq = {}
+     for w in words:
+-        freq[w] += 1
++        freq[w] = freq.get(w, 0) + 1
+     return freq

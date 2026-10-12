@@ -1,0 +1,10 @@
+diff --git a/sumup.py b/sumup.py
+--- a/sumup.py
++++ b/sumup.py
+@@ -1,5 +1,2 @@
+ def total(xs):
+-    acc = 0
+-    for x in xs:
+-        acc += x
+-    return acc
++    return sum(xs)

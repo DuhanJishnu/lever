@@ -1,0 +1,1 @@
+{"category": "refactor", "difficulty": "easy", "id": "r05", "test_cmd": "python -m pytest -q", "timeout": 120}

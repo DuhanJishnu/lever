@@ -1,0 +1,7 @@
+diff --git a/mdict.py b/mdict.py
+--- a/mdict.py
++++ b/mdict.py
+@@ -1,2 +1,2 @@
+ def merge(a, b):
+-    raise NotImplementedError
++    return {**a, **b}

@@ -1,0 +1,23 @@
+diff --git a/alpha.py b/alpha.py
+--- a/alpha.py
++++ b/alpha.py
+@@ -1,6 +1,6 @@
+-def old_name(x):
++def new_name(x):
+     return x + 1
+ 
+ 
+ def caller(x):
+-    return old_name(x) * 10
++    return new_name(x) * 10
+diff --git a/beta.py b/beta.py
+--- a/beta.py
++++ b/beta.py
+@@ -1,5 +1,5 @@
+-from alpha import old_name
++from alpha import new_name
+ 
+ 
+ def shifted(x):
+-    return old_name(x) - 1
++    return new_name(x) - 1

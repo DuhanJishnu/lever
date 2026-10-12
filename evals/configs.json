@@ -1,0 +1,19 @@
+{
+  "b0": {
+    "model": "gemini-2.5-flash",
+    "temperature": 0.2,
+    "thinking_budget": null,
+    "max_steps": 40,
+    "context_budget_tokens": 60000,
+    "tolerant_edit": false,
+    "repo_map": false,
+    "output_truncation": false,
+    "observation_masking": false,
+    "compaction": false,
+    "verify_loop": false,
+    "planner_prompt": false,
+    "loop_guard": false,
+    "best_of_n": 1,
+    "prompt_version": "v1"
+  }
+}

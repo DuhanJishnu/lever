@@ -1,0 +1,33 @@
+diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,5 +1,7 @@
+-TIMEOUT = 30
+-RETRIES = 3
++import config
++
++TIMEOUT = config.TIMEOUT
++RETRIES = config.RETRIES
+ 
+ 
+ def get_timeout():
+diff --git a/worker.py b/worker.py
+--- a/worker.py
++++ b/worker.py
+@@ -1,5 +1,7 @@
+-TIMEOUT = 30
+-RETRIES = 3
++import config
++
++TIMEOUT = config.TIMEOUT
++RETRIES = config.RETRIES
+ 
+ 
+ def attempts():
+diff --git a/config.py b/config.py
+new file mode 100644
+--- /dev/null
++++ b/config.py
+@@ -0,0 +1,2 @@
++TIMEOUT = 30
++RETRIES = 3

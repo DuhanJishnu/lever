@@ -1,0 +1,1 @@
+{"category": "feature", "difficulty": "easy", "id": "f01", "test_cmd": "python -m pytest -q", "timeout": 120}

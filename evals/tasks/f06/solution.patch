@@ -1,0 +1,8 @@
+diff --git a/pal.py b/pal.py
+--- a/pal.py
++++ b/pal.py
+@@ -1,2 +1,3 @@
+ def is_palindrome(s):
+-    raise NotImplementedError
++    clean = "".join(ch.lower() for ch in s if ch.isalnum())
++    return clean == clean[::-1]

@@ -1,0 +1,7 @@
+diff --git a/order.py b/order.py
+--- a/order.py
++++ b/order.py
+@@ -1,2 +1,2 @@
+ def ascending(xs):
+-    return sorted(xs, reverse=True)
++    return sorted(xs)

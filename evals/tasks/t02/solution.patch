@@ -1,0 +1,33 @@
+diff --git a/tests/test_mathx.py b/tests/test_mathx.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_mathx.py
+@@ -0,0 +1,28 @@
++from mathx import gcd, is_prime, lcm
++
++
++def test_gcd():
++    assert gcd(12, 8) == 4
++
++
++def test_gcd_zero():
++    assert gcd(0, 5) == 5
++
++
++def test_lcm():
++    assert lcm(4, 6) == 12
++
++
++def test_lcm_zero():
++    assert lcm(0, 7) == 0
++
++
++def test_primes():
++    assert is_prime(13) is True
++    assert is_prime(15) is False
++
++
++def test_prime_edges():
++    assert is_prime(2) is True
++    assert is_prime(1) is False
++    assert is_prime(0) is False

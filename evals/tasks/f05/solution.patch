@@ -1,0 +1,13 @@
+diff --git a/dedup.py b/dedup.py
+--- a/dedup.py
++++ b/dedup.py
+@@ -1,2 +1,8 @@
+ def dedup(lst):
+-    raise NotImplementedError
++    seen = set()
++    out = []
++    for x in lst:
++        if x not in seen:
++            seen.add(x)
++            out.append(x)
++    return out

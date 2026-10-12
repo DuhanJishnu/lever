@@ -1,0 +1,7 @@
+diff --git a/auth.py b/auth.py
+--- a/auth.py
++++ b/auth.py
+@@ -1,2 +1,2 @@
+ def is_admin(name):
+-    return name == "admin"
++    return name.strip() == "admin"

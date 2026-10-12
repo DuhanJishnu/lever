@@ -1,0 +1,11 @@
+diff --git a/squares.py b/squares.py
+--- a/squares.py
++++ b/squares.py
+@@ -1,6 +1,2 @@
+ def even_squares(nums):
+-    out = []
+-    for n in nums:
+-        if n % 2 == 0:
+-            out.append(n * n)
+-    return out
++    return [n * n for n in nums if n % 2 == 0]

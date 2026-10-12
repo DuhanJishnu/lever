@@ -9,7 +9,7 @@ in one file.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, cast
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -30,7 +30,8 @@ class GeminiProvider:
     def count_tokens(self, messages: list[dict[str, Any]]) -> int:
         try:
             resp = self._client.models.count_tokens(
-                model=str(self.model), contents=self._to_contents(messages)
+                model=str(self.model),
+                contents=cast(Any, self._to_contents(messages)),
             )
             return int(resp.total_tokens or 0)
         except Exception:

@@ -1,0 +1,11 @@
+diff --git a/clamp.py b/clamp.py
+--- a/clamp.py
++++ b/clamp.py
+@@ -1,2 +1,6 @@
+ def clamp(x, lo, hi):
+-    raise NotImplementedError
++    if x < lo:
++        return lo
++    if x > hi:
++        return hi
++    return x

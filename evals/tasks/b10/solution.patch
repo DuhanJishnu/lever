@@ -1,0 +1,11 @@
+diff --git a/search.py b/search.py
+--- a/search.py
++++ b/search.py
+@@ -1,4 +1,6 @@
+ def find_all(xs, pred):
++    out = []
+     for x in xs:
+         if pred(x):
+-            return x
++            out.append(x)
++    return out

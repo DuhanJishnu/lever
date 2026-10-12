@@ -1,0 +1,7 @@
+diff --git a/total.py b/total.py
+--- a/total.py
++++ b/total.py
+@@ -1,2 +1,2 @@
+ def total(n):
+-    return sum(range(n))
++    return sum(range(n + 1))

@@ -1,0 +1,7 @@
+diff --git a/agree.py b/agree.py
+--- a/agree.py
++++ b/agree.py
+@@ -1,2 +1,2 @@
+ def agrees(answer):
+-    return answer == "yes"
++    return answer.strip().lower() == "yes"

@@ -1,0 +1,1 @@
+{"category": "write-tests", "difficulty": "medium", "id": "t03", "test_cmd": "python hidden_tests/grade.py", "timeout": 180}

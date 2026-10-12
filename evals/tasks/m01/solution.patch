@@ -1,0 +1,26 @@
+diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1,5 +1,4 @@
+-def helper(x):
+-    return x * 2
++from util import helper
+ 
+ 
+ def run(x):
+diff --git a/b.py b/b.py
+--- a/b.py
++++ b/b.py
+@@ -1,4 +1,4 @@
+-from a import helper
++from util import helper
+ 
+ 
+ def run2(x):
+diff --git a/util.py b/util.py
+new file mode 100644
+--- /dev/null
++++ b/util.py
+@@ -0,0 +1,2 @@
++def helper(x):
++    return x * 2

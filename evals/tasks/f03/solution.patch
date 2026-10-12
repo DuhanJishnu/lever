@@ -1,0 +1,9 @@
+diff --git a/chunk.py b/chunk.py
+--- a/chunk.py
++++ b/chunk.py
+@@ -1,2 +1,4 @@
+ def chunk(lst, n):
+-    raise NotImplementedError
++    if n <= 0:
++        raise ValueError("n must be positive")
++    return [list(lst[i:i + n]) for i in range(0, len(lst), n)]

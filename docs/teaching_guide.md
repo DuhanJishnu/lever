@@ -394,6 +394,115 @@ you show on screen.
 (a) live-keyed `lever run` on a real bug (validates Gemini multi-turn history);
 (b) Docker Desktop install.
 
+---
+
+## Phase 2: Eval harness (12 Oct 2026) — Step 20
+
+> Gates: `ruff` clean, `mypy strict` clean, **16 tests green** (incl. full
+> 30-task reference gate in ~65s), `validate_tasks.py` **30/30**, dry-run
+> `runner → analyze → charts` proven. Still no Docker on this machine, so the
+> runner ships `local` + `docker` backends with auto-fallback.
+
+### Step 20a — `evals/runner.py`: resumable, parallel, two-backend runner
+
+1. **What:** `list_tasks()` (validates meta id/category + required files),
+   `prepare_workspace()` (repo only), `stage_hidden()` (hidden tests copied at
+   grade time + auto `conftest.py` fixing `sys.path`), `grade_local` /
+   `grade_docker` (mount a copy, `--network none`, `lever-eval` image),
+   `run_one()` (agent run → stage hidden → grade → full metrics dict:
+   pass, tokens in/out, steps, wall time, tool-error/edit-failure/compaction
+   counts, context sizes, `stopped_by`, `fell_for_trap`, diff stat, session id,
+   `cost_usd: null`), driver with `--tasks/--config/--seeds/--backend/--jobs/
+   --out/--dry-run/--redo`, resumable skip of finished (task, config, seed).
+2. **Why:** The measuring stick everything else stands on. Grade-time staging
+   honors "hidden tests NEVER shown to the agent" even on the local backend;
+   resumability + semaphore make overnight 90-run matrices survivable; `cost`
+   stays null without official rates (tokens are truth, prices are guesses).
+3. **Theory:** Evals 101 (Husain): fixed dataset + hidden grading + JSONL results.
+   Counting error classes from the event log (not prose) is what makes edit-failure
+   and stuck-run rates honest secondary metrics. `--dry-run` with FakeProvider
+   proves plumbing while advertising pass=0 — a smoke test, never a result.
+
+### Step 20b — `evals/analyze.py`: pass@1, bootstrap CIs, paired diffs, charts
+
+1. **What:** Per-task rates across seeds → config mean; stdlib-only bootstrap
+   (2000 resamples) 95% CIs; paired per-task deltas vs previous config with CIs;
+   trap rate + stopped-by breakdown in the table; matplotlib bar-with-CI and
+   task×config heatmap PNGs; `--summary-json` for the README pipeline.
+2. **Why:** With n=15 held-out tasks, sub-~10pt deltas are noise — CIs force that
+   honesty, and paired diffs (same tasks) are the only fair config-vs-config claim
+   (Miller's error-bars argument from the plan's [S22]).
+3. **Theory:** Bootstrap = resample tasks with replacement, recompute the mean
+   2000×, take the 2.5/97.5 percentiles. No normality assumption, no scipy needed.
+   Heatmaps reveal *which* tasks move (a config can win on average while breaking
+   specific categories — the ladder needs that detail).
+
+### Step 20c — 30 tasks + `SPLIT.md` + `solution.patch` per task
+
+1. **What:** 10 bugfix / 8 feature / 5 refactor / 4 multi-file / 3 write-tests,
+   each with repo + issue-style `task.md` + hidden tests + `meta.json`
+   (+ `trap` on 8: buggy-pattern remnants like `sum(range(n))`, `old_name`).
+   Refactor tasks carry structural asserts (`hasattr`, `is_dataclass`, no
+   `.append`) so they FAIL pre-patch — behavior-only checks would pass on the
+   smelly code and be worthless. Write-tests tasks grade via hidden `grade.py`
+   (file exists + ≥N tests + all pass). Split: dev b01-05/f01-04/r01-03/m01-02/
+   t01, held-out the rest, decided before any tuning.
+2. **Why:** "Mostly Python, small repos, own mutations" = fast, cheap, uncontaminated.
+   Structural asserts are the key insight: a refactor task must test the *refactor*,
+   not just behavior. Traps measure steering (did the fix actually land?).
+3. **Theory:** Trap cases (from the distilled doc): the obvious answer is often wrong;
+   `fell_for_trap` distinguishes "model can't" from "harness didn't steer". Held-out
+   discipline: tuning against the final set inflates the headline number — the split
+   is written down *before* the first real run so nobody can quietly move the line.
+
+### Step 20d — `evals/validate_tasks.py` + the patch autopsy (video gold)
+
+1. **What:** Per task: stage → grade (must FAIL) → `git apply solution.patch`
+   (must apply) → grade 3× (must PASS every time — flakiness check). First full run:
+   **20/30**. Root causes, in order: (1) hand-written unified-diff hunk headers with
+   wrong line counts — `git apply` exited 0 yet **silently truncated files** (missing
+   `return` → `None` returns, `IndentationError`, dropped tests); (2) generator v1
+   passed `a`/`b` as difflib labels (git: "inconsistent old filename"); (3) generator
+   v2 used `lineterm=""`, collapsing the body so header-slicing deleted everything;
+   (4) generator v3 wrote CRLF on Windows (Python text-mode `\n`→`\r\n`), git read
+   `\r` as trailing whitespace/content mismatch. Fix: `newline="\n"` + correct
+   labels + default lineterm. Reran: **30/30**. Repair script kept at
+   `scripts/regen_patches.py`.
+2. **Why:** "Every task must FAIL then PASS with a reference solution" is the
+   credibility of the whole eval — a task that passes pre-patch can't measure
+   anything, and a broken reference blocks CI. Keeping the repair script preserves
+   the evidence trail.
+3. **Theory:** Three lessons: (a) never hand-write diffs — generate them (difflib is
+   correct by construction, humans miscount); (b) exit-code 0 ≠ correct — only the
+   fail→pass behavior check caught the truncation, which is why validation tests
+   behavior and not application; (c) Windows text-mode translation is a real
+   correctness hazard for patch files — `newline="\n"` is the fix, and it belongs in
+   every file-writing script that produces byte-sensitive artifacts.
+
+### Step 20e — `evals/Dockerfile`, `configs.json`, `README.md`, CI test
+
+1. **What:** `Dockerfile` (python:3.12-slim + pytest = `lever-eval` image; no
+   network at grade time); `configs.json` (the B0 baseline as data — the ladder
+   B1..B8 will append configs here); `README.md` (the 4 commands: validate →
+   dry-run → real run → analyze); `tests/test_tasks_valid.py` (inventory: 30
+   tasks, exact category counts, SPLIT coverage, ≥6 traps + full reference gate).
+   Ruff now excludes `evals/tasks` (task repos *intentionally* contain bugs —
+   linting them would "fix" the eval). Dry-run on b01/f01/t01 → table
+   (`pass@1 0.00`, trap rate 1.0 — correct: FakeProvider changes nothing) +
+   both PNG charts.
+2. **Why:** B0-as-data makes ablations config diffs, not code forks. Excluding task
+   repos from lint is load-bearing: B006 wanted to "fix" b02's mutable default —
+   the bug IS the task. Dry-run proves the full pipeline short of spending API money.
+3. **Theory:** Config-as-data is the ablation ladder made concrete (Step 8's
+   HarnessConfig theory, now on disk). The trap-rate-1.0 dry-run is a nice
+   negative control: the metric correctly reports "nothing fixed" when the agent
+   does nothing — metrics that can't show failure can't show success either.
+
+**Phase 2 exit state:** measuring stick built and validated; pipeline proven
+end-to-end with $0 spent. NOT yet done (needs keyed runs): the real B0 30×3
+matrix, difficulty calibration (is B0 at 20–40%?), `docker build -t lever-eval`
+once Docker Desktop lands. Next: Phase 3 ladder (B1 tolerant edit first).
+
 ### Step 18 — Learned from `harness_engineering_distilled.md`, updated the plan (12 Oct 2026)
 
 1. **What:** Read the full distilled doc (880 lines, from the mini-ai-harness reference:

@@ -1,0 +1,7 @@
+diff --git a/grid.py b/grid.py
+--- a/grid.py
++++ b/grid.py
+@@ -1,2 +1,2 @@
+ def make_grid(n, value=0):
+-    return [[value] * n] * n
++    return [[value] * n for _ in range(n)]

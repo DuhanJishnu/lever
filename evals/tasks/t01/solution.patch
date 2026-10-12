@@ -1,0 +1,26 @@
+diff --git a/tests/test_strutil.py b/tests/test_strutil.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_strutil.py
+@@ -0,0 +1,21 @@
++from strutil import repeat, shout, whisper
++
++
++def test_shout():
++    assert shout("hi") == "HI!"
++
++
++def test_shout_empty():
++    assert shout("") == "!"
++
++
++def test_whisper():
++    assert whisper("  HeLLo ") == "hello"
++
++
++def test_repeat():
++    assert repeat("ab", 3) == "ababab"
++
++
++def test_repeat_zero():
++    assert repeat("ab", 0) == ""

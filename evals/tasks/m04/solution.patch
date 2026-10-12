@@ -1,0 +1,35 @@
+diff --git a/add.py b/add.py
+new file mode 100644
+--- /dev/null
++++ b/add.py
+@@ -0,0 +1,2 @@
++def add(a, b):
++    return a + b
+diff --git a/mul.py b/mul.py
+new file mode 100644
+--- /dev/null
++++ b/mul.py
+@@ -0,0 +1,2 @@
++def mul(a, b):
++    return a * b
+diff --git a/ops.py b/ops.py
+deleted file mode 100644
+--- a/ops.py
++++ /dev/null
+@@ -1,6 +0,0 @@
+-def add(a, b):
+-    return a + b
+-
+-
+-def mul(a, b):
+-    return a * b
+diff --git a/user.py b/user.py
+--- a/user.py
++++ b/user.py
+@@ -1,4 +1,5 @@
+-from ops import add, mul
++from add import add
++from mul import mul
+ 
+ 
+ def poly(x):
