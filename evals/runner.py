@@ -122,7 +122,8 @@ def docker_available() -> bool:
 # ---------- one run ----------
 
 async def run_one(task: dict, config: dict, config_name: str, seed: int,
-                  backend: str, work_root: Path, dry_run: bool) -> dict:
+                  backend: str, work_root: Path, dry_run: bool,
+                  provider_kind: str = "auto") -> dict:
     from lever.core.config import HarnessConfig
     from lever.core.loop import run_loop
     from lever.core.session import Session
@@ -134,10 +135,16 @@ async def run_one(task: dict, config: dict, config_name: str, seed: int,
     run_dir = work_root / f"{task['id']}_{config_name}_s{seed}"
     prepare_workspace(task, run_dir)
 
-    if dry_run or not _has_key():
+    if provider_kind == "fake" or dry_run or (
+            provider_kind == "auto" and not _has_key()):
         from lever.providers.fake import FakeProvider
         provider = FakeProvider.say_hi()
         provider_name = "fake"
+    elif provider_kind == "local":
+        # Local model (llama-server). Free; see docs/local_model.md.
+        from lever.providers.local import LocalProvider
+        provider = LocalProvider()
+        provider_name = f"local:{provider.model}"
     else:
         from lever.providers.gemini import GeminiProvider
         provider = GeminiProvider()
@@ -246,7 +253,7 @@ async def _main_async(args: argparse.Namespace, configs: dict) -> None:
     planned = [(t, cname, seed) for t in tasks for cname in configs
                for seed in range(args.seeds)
                if args.redo or (t["id"], cname, seed) not in done]
-    if not args.dry_run:
+    if not args.dry_run and args.provider != "local":
         est = len(planned) * args.est_tokens_per_run
         print(f"LIVE RUN: {len(planned)} runs x ~{args.est_tokens_per_run} "
               f"tokens = ~{est:,} tokens (thinking billed).")
@@ -267,7 +274,8 @@ async def _main_async(args: argparse.Namespace, configs: dict) -> None:
             print(f"run {task['id']} {cname} s{seed} [{backend}] ...", flush=True)
             try:
                 res = await run_one(task, copy.deepcopy(cfg), cname, seed,
-                                    backend, work_root, args.dry_run)
+                                    backend, work_root, args.dry_run,
+                                    args.provider)
             except Exception as e:  # one bad run must never kill the matrix
                 res = {
                     "task": task["id"], "category": task["category"],
@@ -303,6 +311,10 @@ def main() -> None:
                     help="json {name: HarnessConfig-overrides}")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--backend", default="auto", choices=["auto", "local", "docker"])
+    ap.add_argument("--provider", default="auto",
+                    choices=["auto", "fake", "gemini", "local"],
+                    help="auto: fake for dry-run, else gemini. local: llama-server "
+                         "(free, needs docs/local_model.md setup).")
     ap.add_argument("--jobs", type=int, default=2, help="parallel runs")
     ap.add_argument("--out", default="evals/results/r1.jsonl")
     ap.add_argument("--work-root", default="evals/work")

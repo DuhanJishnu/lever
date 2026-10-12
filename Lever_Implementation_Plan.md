@@ -26,7 +26,8 @@ Start: Mon 12 Oct 2026 · Target public release: ~2 Dec 2026 · Owner: Jishnu
 Everything you build must either (a) improve that number, (b) measure it honestly, or (c) make it demonstrable (UI, README, demo). If a task does none of these, skip it.
 
 **Non-goals (do NOT build these):**
-- Local-model support / Ollama / vLLM (you chose the Gemini API).
+- Local-model serving itself (you run llama-server; Lever only speaks to its
+  OpenAI-compatible endpoint for $0 dev runs — Gemini stays the claims model).
 - A terminal TUI (you chose a web UI; a tiny headless CLI is enough).
 - A plugin marketplace, auth/multi-user, billing, or cloud deployment.
 - LSP integration, multi-provider support beyond the interface, or fancy theming.

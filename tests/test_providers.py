@@ -1,3 +1,4 @@
+import json
 import sys
 from types import SimpleNamespace
 
@@ -168,3 +169,71 @@ async def test_gemini_generation_uses_environment_selected_model(monkeypatch):
 
     assert response.text == "ok"
     assert calls[0]["model"] == "model-from-env"
+
+
+def _mock_local(payload: dict, seen: list) -> object:
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content.decode()))
+        return httpx.Response(200, json=payload)
+
+    return httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://test")
+
+
+@pytest.mark.asyncio
+async def test_local_provider_tool_call_round_trip():
+    from lever.providers.local import LocalProvider, _to_openai
+
+    seen: list = []
+    payload = {
+        "choices": [{"message": {
+            "content": "",
+            "tool_calls": [{"id": "call_1", "type": "function",
+                            "function": {"name": "read_file",
+                                         "arguments": '{"path": "a.py"}'}}]}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }
+    prov = LocalProvider(base_url="http://test", model="m",
+                         client=_mock_local(payload, seen))
+    resp = await prov.generate(
+        [{"role": "user", "content": "read a.py"}],
+        [{"name": "read_file", "description": "r",
+          "parameters": {"type": "object"}}],
+        SimpleNamespace(temperature=0.2),
+    )
+    assert [(c.name, c.args) for c in resp.tool_calls] == [
+        ("read_file", {"path": "a.py"})]
+    assert (resp.input_tokens, resp.output_tokens) == (10, 5)
+    body = seen[0]
+    assert body["model"] == "m" and body["temperature"] == 0.2
+    assert body["tools"][0]["function"]["name"] == "read_file"
+    # History pairing: assistant calls link positionally to tool results.
+    msgs = _to_openai([
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"name": "bash", "args": {"cmd": "a"}},
+                        {"name": "bash", "args": {"cmd": "b"}}]},
+        {"role": "tool", "name": "bash", "content": "out-a"},
+        {"role": "tool", "name": "bash", "content": "out-b"},
+    ])
+    assert [t["id"] for t in msgs[0]["tool_calls"]] == ["call_1", "call_2"]
+    assert [m["tool_call_id"] for m in msgs[1:]] == ["call_1", "call_2"]
+    await prov.aclose()
+
+
+@pytest.mark.asyncio
+async def test_local_provider_helpful_error_when_server_down():
+    import httpx
+
+    from lever.providers.local import LocalProvider
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://test")
+    prov = LocalProvider(base_url="http://test", model="m", client=client)
+    with pytest.raises(ConnectionError, match="docs/local_model.md"):
+        await prov.generate([{"role": "user", "content": "hi"}], [], None)
+    await prov.aclose()

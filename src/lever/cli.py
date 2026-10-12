@@ -63,6 +63,7 @@ def run(
     db: str = typer.Option(".lever_events.db", help="SQLite event-store path."),
     cache_path: str = typer.Option(".lever_cache.jsonl", help="LLM response cache path."),
     fake: bool = typer.Option(False, "--fake", help="Use FakeProvider (no API key)."),
+    provider: str = typer.Option("auto", help="auto|fake|gemini|local (local = llama-server, free)."),
     max_steps: int | None = typer.Option(None, help="Override max_steps."),
 ) -> None:
     load_dotenv()
@@ -77,21 +78,25 @@ def run(
     if max_steps:
         cfg = cfg.model_copy(update={"max_steps": max_steps})
 
-    use_fake = fake or not os.getenv("GEMINI_API_KEY")
-    if use_fake:
+    if provider == "local":
+        from lever.providers.local import LocalProvider
+
+        provider_any: Any = LocalProvider()
+    elif provider == "fake" or fake or (
+            provider == "auto" and not os.getenv("GEMINI_API_KEY")):
         from lever.providers.fake import FakeProvider
 
-        provider: Any = FakeProvider.say_hi()
+        provider_any = FakeProvider.say_hi()
     else:
         from lever.providers.gemini import GeminiProvider
 
-        provider = GeminiProvider()
+        provider_any = GeminiProvider()
 
     store = EventStore(db)
     session = Session(source=Path(repo))
     session.open()
     result = asyncio.run(
-        run_loop(provider=provider, session=session, task=task,
+        run_loop(provider=provider_any, session=session, task=task,
                  config=cfg, store=store, cache=ResponseCache(cache_path))
     )
     for ev in store.read(session.session_id):

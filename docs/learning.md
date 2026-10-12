@@ -385,6 +385,43 @@
 
 ---
 
+## Cost incident + local-model pivot (12 Oct 2026) — Step 24
+
+### Step 24a — Results preserved: 78/90, resumable by construction
+
+1. **What:** Verified `evals/results/ladder_b0b1.jsonl` = exactly 78 rows
+   (13 tasks × 2 configs × 3 seeds); missing 12 = all of r03 + t01 (file is
+   truth — the crash log's stray r03 lines never hit disk). The runner skips
+   finished `(task, config, seed)` keys, so the 12 will fill in later with zero
+   re-spend; summary + `docs/ablations.md` committed as the durable record.
+2. **Why:** Your instruction: never pay for these twice. Resumability was built
+   for overnight crashes; it doubles as spend protection.
+3. **Theory:** Idempotent matrices (same key → skip) make eval spend
+   incremental and auditable — each row is a receipt.
+
+### Step 24b — `providers/local.py`: llama-server endpoint ($0 dev runs)
+
+1. **What:** New `LocalProvider` speaking OpenAI-compatible `/chat/completions`
+   via httpx: canonical defs → `function` tools, canonical history → OpenAI
+   messages with synthetic `call_N` ids paired positionally (valid: the loop
+   strictly alternates calls→results), malformed args → `_raw` instead of a
+   crash, unreachable server → error pointing at `docs/local_model.md`.
+   Wired as `--provider local` in CLI + runner (runner skips the cost confirm
+   for local). `count_tokens` = chars//4 (documented estimate). Tested offline
+   with `httpx.MockTransport` (round-trip, id pairing, down-server error).
+   New `docs/local_model.md` (install → GGUF → serve → env → smoke test +
+   caveats) and plan non-goal updated (Gemini stays the claims model).
+2. **Why:** Nothing on this machine serves models yet (no Ollama, no
+   llama-server, no GGUF found) — so the harness side is built and tested
+   first; you install the ~2.5 GB model + server when ready. Day-to-day
+   debugging then costs $0; Gemini returns only for final numbers.
+3. **Theory:** Same Provider protocol, third transport: the loop never learns
+   which model it drives. Ladders stay single-provider (a 4B local and a Flash
+   model in one table would compare models, not harnesses — the exact
+   confounding the fixed-temperature rule exists to prevent).
+
+---
+
 ## Phase 3: B0-vs-B1 matrix + cost incident (12 Oct 2026) — Step 23
 
 ### Step 23a — Matrix result: ceiling effect (78/90 runs, FREE analysis)
@@ -483,6 +520,7 @@
 | 21 | Native function parts + signature echo | `providers/gemini.py`, `core/loop.py` | Prose history gets parroted; 3.x 400s without byte signatures |
 | 22 | Parser specificity order (call→thought→text) | `providers/gemini.py:_from_response` | A broad catch-all above the call branch eats the calls |
 | 23 | Empty-turn retry + `stopped_by="empty"` | `core/loop.py` | Model-side flakes must read as flakes, not as harness failure |
+| 24 | Local provider behind the same Protocol | `providers/local.py`, `docs/local_model.md` | $0 dev loops; ladders stay single-provider or they compare models |
 
 ---
 
