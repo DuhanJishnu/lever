@@ -101,9 +101,24 @@ class GeminiProvider:
                 out.append({"role": "user", "parts": [{"text": str(content)}]})
         return out
 
-    def _to_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        # SDK accepts OpenAPI-style function_declarations; pass through.
-        return tools
+    def _to_tools(self, tools: list[dict[str, Any]]) -> list[Any]:
+        """Translate our canonical defs ({name, description, parameters}) into
+        SDK Tool(function_declarations=[...]). Canonical form keeps us
+        provider-agnostic: the same defs render as OpenAI-style functions for
+        an OpenAI-compatible endpoint later."""
+        from google.genai import types
+
+        decls: list[Any] = []
+        for t in tools:
+            if isinstance(t, dict) and "name" in t:
+                decls.append(
+                    types.FunctionDeclaration(
+                        name=t["name"],
+                        description=t.get("description", ""),
+                        parameters=t.get("parameters", {"type": "object"}),
+                    )
+                )
+        return [types.Tool(function_declarations=decls)] if decls else []
 
     def _from_response(self, resp: Any) -> ModelResponse:
         text_parts: list[str] = []

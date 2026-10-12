@@ -10,3 +10,6 @@ lever_cache/
 .lever_cache.jsonl
 .lever_events.db
 .lever_events.db-*
+.lever_workspaces/
+
+/harness_engineering_distilled

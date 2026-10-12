@@ -254,7 +254,145 @@ you show on screen.
 
 ---
 
-## Phase 1: Baseline B0 (starts next — append Step 18+ here)
+**Phase 0 exit state:** commits `c57f5b1` → `3ae365b`. Awaiting from Jishnu:
+(a) live-key run of `say_hi.py` without `--fake` to confirm real multi-turn tool calling;
+(b) Docker Desktop install to unblock Phase 2's sandbox design.
+
+---
+
+## Phase 1: Baseline B0 (12 Oct 2026) — Step 19
+
+> One build step, many files. Each file below has its own What/Why/Theory.
+> Gates: `ruff` clean, `mypy strict` clean, **14 tests green** (5 Phase-0 + 9 new),
+> CLI smoke test prints JSONL events + stderr summary.
+
+### Step 19a — `src/lever/providers/gemini.py` edit: real `_to_tools` translation
+
+1. **What:** Replaced the passthrough `_to_tools` with a translator: our canonical
+   defs (`{name, description, parameters}`) → `[types.Tool(function_declarations=[...])]`.
+   Verified field names against the installed SDK (`FunctionDeclaration`: `name`,
+   `description`, `parameters`; `Tool`: `function_declarations`).
+2. **Why:** The SDK rejects OpenAI-style function schemas; without this, the first live
+   tool-calling run would 400. Canonical defs keep us provider-agnostic (same defs render
+   as OpenAI functions later).
+3. **Theory:** Adapter pattern again — every vendor shape lives in this file. Checking
+   `model_fields` on the installed package (not docs from memory) is the reliable move;
+   SDK field names drift between versions.
+
+### Step 19b — `src/lever/tools/base.py`: cap, path safety, Tool/Registry
+
+1. **What:** `MAX_OUTPUT_CHARS=20000` + `cap_output()`; `resolve_safe()` (resolve +
+   `is_relative_to` check, rejects `..` escapes with a model-readable message);
+   `Tool` dataclass (name/description/parameters-JSON-schema/`execute` coroutine,
+   `.definition` property); `ToolRegistry` (`by_name`, `.definitions`, `run()` returning
+   model-friendly errors, unknown-tool lists available names).
+2. **Why:** Two B0 promises in one file: runs can't explode from giant outputs, and the
+   model can't read/write outside the workspace. `run()` never raises — every failure
+   becomes text the weak model can recover from (plan decision #4, early).
+3. **Theory:** Agent-computer interface (SWE-agent): the tool surface *is* the model's
+   world. Small, well-described tools with clear errors beat powerful-but-cryptic ones.
+   `resolve()` before comparing defeats `a/../../evil` tricks that string checks miss.
+
+### Step 19c — `src/lever/tools/fs.py`, `edit.py`, `grep.py`, `bash.py`: the 5 tools
+
+1. **What:** Factories `make_*_tool(root)` binding each tool to the workspace:
+   `read_file` (missing file → "use grep" hint), `write_file` (mkdir parents),
+   `edit_file` (**exact-match-only**: 0 hits → "copy exactly incl. whitespace", >1 →
+   "add context", 1 → apply + unified diff), `grep` (regex, skips `.git/.venv`/binary/
+   >1MB, max 50 matches `file:line`), `bash` (workspace cwd, timeout default 30s,
+   `exit=` + merged output, blocking call offloaded via `asyncio.to_thread`).
+2. **Why:** Deliberately naive baseline — every cleverness (fuzzy edit, ranged reads,
+   truncation, allowlists) is a later ablation with its own measured delta. If B0 were
+   smart, the ladder couldn't attribute gains.
+3. **Theory:** Tools as capabilities: high-level (`grep`, not "read bytes"), structured
+   returns (diff, `file:line`), verification-ready (exit codes). `to_thread` matters:
+   a blocking `subprocess.run` inside a coroutine would freeze the whole asyncio loop
+   (later: live SSE streaming) — ruff's ASYNC221 rule caught this.
+
+### Step 19d — `src/lever/tools/registry.py`: `create_tools(session)` factory
+
+1. **What:** `create_tools(workspace)` builds all 5 tools bound to that workspace;
+   `loop.py` imports it lazily (function-level import) to avoid a core↔tools cycle.
+2. **Why:** Directly implements Step 18's DI pattern: tools bound per session, no
+   globals → parallel eval runs + temp-dir unit tests work.
+3. **Theory:** Dependency injection: the harness owns the environment, tools borrow it.
+   Lazy import keeps the dependency arrow one-way (tools→core), a classic cycle-breaker.
+
+### Step 19e — `src/lever/core/guards.py`: composable guardrails (skeletal)
+
+1. **What:** `GuardResult` (continue/stop+reason), `LoopState`
+   (iterations/max_steps/context_messages/est_tokens), `Guard` callable type,
+   `max_steps_guard`, `compose_guards` (first stop wins). B0 composes exactly one guard.
+2. **Why:** Step 18's B8 design, installed as the interface now so B8 only *adds*
+   guard functions instead of rewiring the loop.
+3. **Theory:** Guardrails-vs-verify: these run *before* each model call and the model
+   cannot bypass them (structural). Composability = each rule is independently testable.
+
+### Step 19f — `src/lever/core/session.py`: copy-workspace lifecycle
+
+1. **What:** `Session(source)`: `open()` copies source → `.lever_workspaces/<id>/`
+   (ignoring `.git/.venv/caches`), `git init` + baseline commit (best-effort);
+   `close()` persists workspace (intentional in B0); `get_diff()` returns
+   `git diff --stat`.
+2. **Why:** Plan said "git worktree per session" — on Windows, copy+init gives the same
+   clean-diffs property with zero worktree quirks. Interface (`workspace`, `open/close`,
+   `get_diff`) is what later phases code against, so Docker/worktrees can swap in.
+3. **Theory:** Harness owns the lifecycle (distilled doc's non-negotiable pattern).
+   Baseline commit = checkpoint primitive for free (fork/replay build on this).
+
+### Step 19g — `src/lever/core/loop.py`: the naive loop with trace + stopped_by
+
+1. **What:** `fresh_context()` (system+user, per-task isolation), `estimate_tokens()`
+   (chars//4, local — no API cost per iteration), `ToolEvent`/`LoopIteration`
+   (index/outcome/tool_events/context_size)/`LoopResult`
+   (answer/iterations/trace/stopped_by/session_id), `run_loop()`:
+   user_message → per-step guard check → model_request → cached-or-live generate →
+   model_response → tool_call/tool_result per call → session_end; `for/else` sets
+   `max_steps` when never breaking; try/finally always closes the session.
+   Assistant history notes which calls were made (`[calls: ...]`) — flagged B0
+   simplification for the live-model test to validate.
+2. **Why:** The baseline everything compares to. Events make replay exact; trace makes
+   failure analysis possible (Phase 5); `stopped_by` distinguishes gave-up vs
+   guardrail-stopped; cache wiring means re-runs are free.
+3. **Theory:** `for/else` (else = no break = exhausted steps) is the precise idiom for
+   "ran out of budget". Emitting `model_request` *before* the call keeps the log honest
+   about attempts vs completions. Local token estimates avoid N extra billed API calls
+   per run — exact counts only where needed (B5 compaction).
+
+### Step 19h — `src/lever/cli.py`: `lever run` + `lever sessions`
+
+1. **What:** Typer app, `lever` console script: `run --repo --task [--config b0|file]
+   [--db] [--cache-path] [--fake] [--model] [--max-steps]` (yaml/json overrides merged
+   onto `b0()`); `--fake` or missing key → FakeProvider; prints session events as JSONL
+   on stdout, summary (`stopped_by`, iterations, answer, diff stat) on stderr.
+   Added `sessions` list command — needed because Typer flattens single-command apps
+   (without it, `lever run` errored: "unexpected extra argument").
+2. **Why:** Headless runs for evals start here; stdout-JSONL is the future event-stream
+   protocol (Phase 6 adapter). stderr summary keeps stdout machine-parseable.
+3. **Theory:** stdout = data, stderr = chatter — the Unix contract that makes
+   `lever run ... | runner.py` composable. (Video anecdote: the framework "helpfully"
+   collapsing one command, fixed by adding a genuinely useful second command.)
+
+### Step 19i — `tests/test_tools.py`, `tests/test_loop.py`: 9 new tests
+
+1. **What:** Tools: escape rejection, write→read→edit round-trip, miss/ambiguous edit
+   errors, grep hits/misses/bad-regex, bash exit/timeout/empty, unknown tool, output
+   cap via monkeypatched limit. Loop: direct-answer event sequence
+   (`user_message→model_request→model_response→session_end`), max-steps guard with a
+   never-stopping provider, and the **acceptance e2e**: toy repo with `return a - b`
+   bug (proven failing), scripted read→edit→pytest→summary run fixes it, workspace
+   tests go green, trace outcomes + context sizes + replay equality asserted.
+2. **Why:** "Do not start Phase 2 until the acceptance passes" — the e2e test *is* the
+   gate, in CI, offline, deterministic. Scripted provider proves plumbing; the live
+   model proves intelligence (left for Jishnu's keyed run).
+3. **Theory:** Test seams not vendors: ordering, safety, error text, trace shape.
+   Proving the test fails *before* the fix (not just passes after) is what makes it an
+   eval rather than a demo — this exact discipline scales into Phase 2's 30 tasks.
+
+**Phase 1 exit state:** B0 solves the toy bug end-to-end (scripted), replay exact,
+`lever run` streams JSONL. Next: Phase 2 eval harness. Still awaiting Jishnu:
+(a) live-keyed `lever run` on a real bug (validates Gemini multi-turn history);
+(b) Docker Desktop install.
 
 ### Step 18 — Learned from `harness_engineering_distilled.md`, updated the plan (12 Oct 2026)
 
