@@ -385,6 +385,41 @@
 
 ---
 
+## Phase 3: Ablation ladder (12 Oct 2026) — Step 22: B1 tolerant edit
+
+> Rule: one feature at a time, dev-set delta before keep/discard. B0-vs-B1
+> matrix (15 dev × 2 configs × 3 seeds = 90 runs) launched in background on
+> commit; results → `docs/ablations.md` + Step 23.
+
+### Step 22 — B1: tolerant `edit_file` cascade (`tools/edit.py`, `registry.py`, `loop.py`)
+
+1. **What:** Rewrote `edit.py` as a cascade behind `tolerant_edit` (B0 path
+   byte-identical, asserted by `test_b0_stays_exact`): (1) exact unique (or all
+   with new `replace_all` flag); multi-hit errors list `line N` locations and
+   suggest `replace_all`; (2) whitespace/indentation-normalized windows, applied
+   only if exactly one candidate (ambiguous → error asking for more context);
+   (3) fuzzy sliding window (`SequenceMatcher ≥ 0.9`), applied only if exactly
+   one candidate, else structured miss report (closest `lines s-e`, similarity,
+   6-line snippet); (4) no-candidate error. Every successful `.py` edit is
+   `compile()`-checked (never executed) — breakage reverts with the exact line
+   (`REVERTED … line 1`). Wiring: `create_tools(workspace, config)` reads the
+   flag; `loop.py` passes its config; `evals/configs.json` gains `b1`
+   (b0 + `tolerant_edit: true`). 7 new unit tests (ws-match, fuzzy typo,
+   ambiguity, replace-all, syntax revert, closest-report, B0-exactness).
+2. **Why:** B0's exact-match dies on the model's two most common edit failures:
+   copied-with-wrong-whitespace and near-miss blocks. The cascade recovers both
+   while the uniqueness rule contains over-matching (ambiguous → error, never a
+   wrong edit). `compile()`-revert turns syntax breakage into a retryable
+   message instead of a broken workspace the model must debug.
+3. **Theory:** Matching specificity ladder (exact → normalized → fuzzy), each
+   rung strictly weaker, each gated on uniqueness — precision first, recall
+   second. Syntax-check-as-postcondition is the guardrails-vs-verify split at
+   tool scale: the tool enforces "never break syntax" structurally so the loop
+   never spends turns repairing self-inflicted damage. `replace_all` is the
+   honest answer to multi-match (explicit intent) vs guessing (wrong intent).
+
+---
+
 ## Key Architectural Decisions Captured (For Video Narration)
 
 | # | Decision | Where It Lives | Why It Matters for Video |

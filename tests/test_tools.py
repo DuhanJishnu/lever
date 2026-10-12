@@ -1,10 +1,15 @@
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, "src")
 
 import pytest
 
 from lever.tools.registry import create_tools
+
+
+def _tolerant(tmp_path):
+    return create_tools(tmp_path, SimpleNamespace(tolerant_edit=True))
 
 
 def test_path_escape_rejected(tmp_path):
@@ -73,3 +78,89 @@ async def test_output_cap(tmp_path, monkeypatch):
     (tmp_path / "big.txt").write_text("z" * 100, encoding="utf-8")
     out = await reg.run("read_file", {"path": "big.txt"})
     assert "truncated" in out
+
+
+@pytest.mark.asyncio
+async def test_b1_whitespace_insensitive_match(tmp_path):
+    reg = _tolerant(tmp_path)
+    (tmp_path / "f.py").write_text("def f():\n    return 1   \n", encoding="utf-8")
+    out = await reg.run("edit_file", {
+        "path": "f.py", "old_str": "def f():\n  return 1", "new_str": "def f():\n  return 2",
+    })
+    assert "Edit applied" in out and "whitespace" in out
+    assert (tmp_path / "f.py").read_text(encoding="utf-8") == "def f():\n  return 2"
+
+
+@pytest.mark.asyncio
+async def test_b1_fuzzy_match_small_typo(tmp_path):
+    reg = _tolerant(tmp_path)
+    (tmp_path / "g.py").write_text(
+        "def total(n):\n    return sum(range(n + 1))\n", encoding="utf-8")
+    await reg.run("edit_file", {
+        "path": "g.py",
+        "old_str": "def total(n):\n    return sum(range(n + 1))",
+        "new_str": "def total(n):\n    return sum(range(n + 2))",
+    })
+    # exact hit here; now a real typo that still clears 0.9
+    (tmp_path / "h.py").write_text("result = compute_total(items)\n", encoding="utf-8")
+    out2 = await reg.run("edit_file", {
+        "path": "h.py",
+        "old_str": "result = compute_totals(items)\n",
+        "new_str": "result = compute_total(items, fast=True)\n",
+    })
+    assert "Edit applied" in out2 and "fuzzy" in out2
+
+
+@pytest.mark.asyncio
+async def test_b1_ambiguous_reports_lines(tmp_path):
+    reg = _tolerant(tmp_path)
+    (tmp_path / "d.py").write_text("x = 1\ny = 2\nx = 1\n", encoding="utf-8")
+    out = await reg.run("edit_file", {"path": "d.py", "old_str": "x = 1",
+                                      "new_str": "x = 9"})
+    assert "2 locations" in out and "replace_all" in out
+    assert (tmp_path / "d.py").read_text(encoding="utf-8") == "x = 1\ny = 2\nx = 1\n"
+
+
+@pytest.mark.asyncio
+async def test_b1_replace_all(tmp_path):
+    reg = _tolerant(tmp_path)
+    (tmp_path / "d.py").write_text("x = 1\ny = 2\nx = 1\n", encoding="utf-8")
+    out = await reg.run("edit_file", {"path": "d.py", "old_str": "x = 1",
+                                      "new_str": "x = 9", "replace_all": True})
+    assert "Edit applied" in out
+    assert (tmp_path / "d.py").read_text(encoding="utf-8") == "x = 9\ny = 2\nx = 9\n"
+
+
+@pytest.mark.asyncio
+async def test_b1_syntax_revert(tmp_path):
+    reg = _tolerant(tmp_path)
+    before = "x = 1\nprint(x)\n"
+    (tmp_path / "s.py").write_text(before, encoding="utf-8")
+    out = await reg.run("edit_file", {"path": "s.py", "old_str": "x = 1",
+                                      "new_str": "x = "})
+    assert "REVERTED" in out and "line 1" in out
+    assert (tmp_path / "s.py").read_text(encoding="utf-8") == before
+
+
+@pytest.mark.asyncio
+async def test_b1_miss_reports_closest(tmp_path):
+    reg = _tolerant(tmp_path)
+    (tmp_path / "m.py").write_text(
+        "def alpha():\n    return 1\n\n\ndef beta():\n    return 2\n",
+        encoding="utf-8")
+    out = await reg.run("edit_file", {
+        "path": "m.py",
+        "old_str": "def gamma():\n    return 3\n    extra_line_here = True\n",
+        "new_str": "x",
+    })
+    assert "Closest match at lines" in out and "similarity" in out
+
+
+@pytest.mark.asyncio
+async def test_b0_stays_exact(tmp_path):
+    reg = create_tools(tmp_path)  # tolerant off by default
+    (tmp_path / "f.py").write_text("a = 1\n", encoding="utf-8")
+    out = await reg.run("edit_file", {"path": "f.py", "old_str": "a  =  1",
+                                      "new_str": "a = 2"})
+    assert "exact match required" in out
+    assert (tmp_path / "f.py").read_text(encoding="utf-8") == "a = 1\n"

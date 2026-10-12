@@ -81,7 +81,7 @@ async def run_loop(
 
     workspace = session.workspace or session.open()
     if tools is None:
-        tools = create_tools(workspace)
+        tools = create_tools(workspace, config)
     guards = compose_guards(max_steps_guard)  # B0: max_steps only; B8 extends this list
 
     store.append(Event(session_id=session.session_id, seq=0,
