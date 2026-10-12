@@ -43,6 +43,8 @@ def bootstrap_ci(values: list[float], n: int = 2000, seed: int = 0) -> tuple[flo
 
 def summarize(rows: list[dict]) -> dict[str, dict]:
     configs = sorted({r["config"] for r in rows})
+    errors = [r for r in rows if r.get("error")]
+    rows = [r for r in rows if not r.get("error")]  # error rows never count as fails
     out: dict[str, dict] = {}
     for c in configs:
         rates = task_rates(rows, c)
@@ -61,6 +63,9 @@ def summarize(rows: list[dict]) -> dict[str, dict]:
             "trap_rate": _rate([r["fell_for_trap"] for r in cr
                                 if r["fell_for_trap"] is not None]),
             "stopped_by": _counts([r["stopped_by"] for r in cr]),
+            "edit_failures": sum(r["edit_failures"] for r in cr),
+            "tool_errors": sum(r["tool_errors"] for r in cr),
+            "n_errors": sum(1 for r in errors if r["config"] == c),
         }
     # Paired diffs vs previous config (sorted order): same tasks only.
     for i in range(1, len(configs)):
@@ -138,19 +143,20 @@ def make_charts(rows: list[dict], summary: dict, out_dir: Path) -> list[str]:
 
 
 def markdown_table(summary: dict) -> str:
-    lines = ["| config | tasks | pass@1 | 95% CI | tok/run | steps | wall_s | trap | stopped_by |",
-             "|---|---|---|---|---|---|---|---|---|"]
+    lines = ["| config | tasks | pass@1 | 95% CI | tok/run | steps | wall_s | trap | editfail | toolerr | errors | stopped_by |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for c, s in summary.items():
         lines.append(
             f"| {c} | {s['tasks']} | {s['pass_at_1']:.2f} | "
             f"[{s['ci95'][0]:.2f}, {s['ci95'][1]:.2f}] | {s['mean_tokens']} | "
-            f"{s['mean_steps']} | {s['mean_wall_s']} | {s['trap_rate']} | {s['stopped_by']} |"
+            f"{s['mean_steps']} | {s['mean_wall_s']} | {s['trap_rate']} | "
+            f"{s['edit_failures']} | {s['tool_errors']} | {s['n_errors']} | {s['stopped_by']} |"
         )
         for k, v in s.items():
             if k.startswith("paired_vs_"):
                 lines.append(
-                    f"|  ↳ {k} |  | Δ {v['delta']:+.2f} | "
-                    f"[{v['ci95'][0]:+.2f}, {v['ci95'][1]:+.2f}] (n={v['tasks']}) | | | | | |"
+                    f"|  -> {k} |  | d {v['delta']:+.2f} | "
+                    f"[{v['ci95'][0]:+.2f}, {v['ci95'][1]:+.2f}] (n={v['tasks']}) | | | | | | | | | |"
                 )
     return "\n".join(lines)
 

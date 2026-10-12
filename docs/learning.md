@@ -385,6 +385,42 @@
 
 ---
 
+## Phase 3: B0-vs-B1 matrix + cost incident (12 Oct 2026) — Step 23
+
+### Step 23a — Matrix result: ceiling effect (78/90 runs, FREE analysis)
+
+1. **What:** Ran `analyze.py` on the partial JSONL (78 rows; 12 missing after
+   the cap): B0 = B1 = **100% pass** (13 tasks, CI [1.00, 1.00]), paired delta
+   **+0.00**, edit failures **0 in both**, steps ~10 tied. Fixed two Windows
+   encoding crashes in the table printer (non-ASCII `↳`/`Δ` → ASCII).
+2. **Why:** The dev set can't discriminate B1 — exact match sufficed on every
+   task, so the cascade never engaged. Tasks written for a weaker model are too
+   easy for 3.8-flash. Decision logged in `docs/ablations.md`: **KEEP on
+   mechanism, UNMEASURED on outcome** (unit-tested, strictly wider, no harm).
+3. **Theory:** A metric that can't show failure can't show success (same lesson
+   as the trap-1.0 dry-run, inverted): 100% baselines carry zero information
+   about deltas. Either harden tasks or measure secondaries — chosen: propose
+   edit-stress tasks where B0 verifiably fails first.
+
+### Step 23b — Cost guardrails (`evals/runner.py`, no API spent)
+
+1. **What:** Runner now defaults to `--dry-run` ($0); live runs REQUIRE `--live`
+   plus a printed estimate (`planned × --est-tokens-per-run`, default 25k from
+   measured data) and `[y/N]` confirm (or `--yes`). Verified: unflagged run
+   forces dry-run. Also: per-run try/except → error rows (a dead run can never
+   kill a matrix again), `analyze.py` excludes error rows and reports
+   `n_errors`.
+2. **Why:** A 90-run matrix at ~21–26k tokens/run (thinking billed) tripped the
+   monthly cap mid-run. The spend rate (~2M tokens for one ladder rung) was
+   never estimated or approved first — process failure, fixed in code.
+3. **Theory:** Cost is a first-class eval parameter: estimate before, confirm
+   before, pilot (1 task × 1 seed) before matrix. Open lever for approval:
+   `thinking_level` LOW for matrices (verified working; far fewer thought
+   tokens) — changes model behavior, so it needs an explicit yes and must then
+   stay constant across B0..B8.
+
+---
+
 ## Phase 3: Ablation ladder (12 Oct 2026) — Step 22: B1 tolerant edit
 
 > Rule: one feature at a time, dev-set delta before keep/discard. B0-vs-B1

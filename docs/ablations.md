@@ -1,0 +1,41 @@
+# Ablation ladder (dev set; held-out untouched)
+
+Runner: `evals/runner.py`. Analysis: `evals/analyze.py` (pass@1, bootstrap 95%
+CI, paired per-task deltas). Raw JSONL: `evals/results/` (gitignored — large,
+regenerable; summaries committed here).
+
+## B0 vs B1 (12 Oct 2026) — PARTIAL, 78/90 runs
+
+Matrix: 15 dev tasks × {b0, b1} × 3 seeds. Finished 78; 12 missing
+(r03 s2 + r03/b1 ×3 + t01 ×6) — run died on API 429 spending-cap.
+Results file: `evals/results/ladder_b0b1.jsonl`
+(+ `ladder_b0b1_summary.json`).
+
+| config | tasks | pass@1 | 95% CI | tok/run | steps | trap | editfail | toolerr |
+|---|---|---|---|---|---|---|---|---|
+| b0 | 13 | 1.00 | [1.00, 1.00] | 21424 | 10.2 | 0.0 | 0 | 8 |
+| b1 | 13 | 1.00 | [1.00, 1.00] | 25888 | 10.3 | 0.0 | 0 | 8 |
+| paired b1-vs-b0 | | d +0.00 | [+0.00, +0.00] (n=13) | | | | | |
+
+**Decision: KEEP (on mechanism, UNMEASURED on outcome).** Rationale:
+- The dev set cannot discriminate B1: B0 already passes 13/13 with ZERO edit
+  failures — exact match sufficed everywhere, so the cascade never engaged.
+  Ceiling effect: these tasks (written for a weaker model) are too easy for
+  3.8-flash, which copies blocks exactly.
+- Keep (don't revert) because: unit-tested cascade strictly widens acceptance,
+  uniqueness-gated (ambiguous → error, never wrong edit), syntax-revert adds
+  safety, and there is no harm signal (steps/wall statistically tied; token gap
+  is thinking variance, not the feature).
+- To *measure* B1 honestly we need edit-stress tasks (whitespace-shifted,
+  typo'd, or multi-match blocks) where B0 verifiably fails. Proposed next.
+
+## Cost incident (12 Oct 2026)
+
+The 90-run matrix at ~21–26k tokens/run (thinking billed) tripped the monthly
+spending cap (~₹150) before finishing. Contributing factors: 3 seeds × 15 tasks
+× 2 configs launched at once, default thinking (medium), no budget gate.
+Guardrails added the same day (`runner.py`): runs default to `--dry-run` ($0);
+real runs REQUIRE `--live` plus an estimate + `[y/N]` confirm (or `--yes`).
+Rule going forward: pilot 1 task × 1 seed → check tokens → approve matrix.
+Open lever: pin `thinking_level` LOW for matrices (verified working, far fewer
+thought tokens) — needs your approval since it changes model behavior.

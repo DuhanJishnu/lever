@@ -243,22 +243,51 @@ async def _main_async(args: argparse.Namespace, configs: dict) -> None:
     work_root = Path(args.work_root)
     work_root.mkdir(parents=True, exist_ok=True)
 
+    planned = [(t, cname, seed) for t in tasks for cname in configs
+               for seed in range(args.seeds)
+               if args.redo or (t["id"], cname, seed) not in done]
+    if not args.dry_run:
+        est = len(planned) * args.est_tokens_per_run
+        print(f"LIVE RUN: {len(planned)} runs x ~{args.est_tokens_per_run} "
+              f"tokens = ~{est:,} tokens (thinking billed).")
+        if not args.yes:
+            try:
+                ok = input("Proceed? [y/N] ").strip().lower() == "y"
+            except EOFError:
+                ok = False
+            if not ok:
+                print("Aborted. Re-run with --yes to confirm.")
+                return
+
     async def _guarded(task: dict, cname: str, cfg: dict, seed: int) -> None:
         async with sem:
             if (task["id"], cname, seed) in done:
                 print(f"skip {task['id']} {cname} s{seed} (done)")
                 return
             print(f"run {task['id']} {cname} s{seed} [{backend}] ...", flush=True)
-            res = await run_one(task, copy.deepcopy(cfg), cname, seed,
-                                backend, work_root, args.dry_run)
+            try:
+                res = await run_one(task, copy.deepcopy(cfg), cname, seed,
+                                    backend, work_root, args.dry_run)
+            except Exception as e:  # one bad run must never kill the matrix
+                res = {
+                    "task": task["id"], "category": task["category"],
+                    "difficulty": task.get("difficulty", "medium"),
+                    "config": cname, "seed": seed, "provider": "error",
+                    "backend": backend, "dry_run": args.dry_run,
+                    "pass": False, "error": f"{type(e).__name__}: {str(e)[:500]}",
+                    "stopped_by": "error", "steps": 0, "tokens_in": 0,
+                    "tokens_out": 0, "tool_errors": 0, "edit_failures": 0,
+                    "compactions": 0, "context_sizes": [], "fell_for_trap": None,
+                    "diff_stat": "", "session_id": "", "wall_s": 0.0,
+                    "cost_usd": None,
+                }
             await asyncio.to_thread(_append_result, out, res)
             print(f"  -> pass={res['pass']} stopped={res['stopped_by']} "
                   f"steps={res['steps']} {res['wall_s']}s", flush=True)
 
     await asyncio.gather(*[
         _guarded(t, cname, cfg, seed)
-        for t in tasks for cname, cfg in configs.items()
-        for seed in range(args.seeds)
+        for (t, cname, seed) in planned for cfg in [configs[cname]]
     ])
 
 
@@ -280,7 +309,19 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true",
                     help="FakeProvider plumbing check (pass=0 expected)")
     ap.add_argument("--redo", action="store_true", help="ignore resumable progress")
+    ap.add_argument("--live", action="store_true",
+                    help="REQUIRED for real API runs. Without it, runs are "
+                         "forced to --dry-run (spends $0).")
+    ap.add_argument("--yes", action="store_true",
+                    help="Skip the live-run cost confirmation prompt.")
+    ap.add_argument("--est-tokens-per-run", type=int, default=25000,
+                    help="Empirical tokens/run for cost estimates (measured "
+                         "78-run matrix: ~21-26k with thinking on).")
     args = ap.parse_args()
+    if not args.live:
+        if not args.dry_run:
+            print("NOT live: forcing --dry-run (pass --live to spend API budget).")
+        args.dry_run = True
     with open(args.config, encoding="utf-8") as f:
         configs: dict[str, dict] = json.load(f)
     asyncio.run(_main_async(args, configs))
