@@ -26,10 +26,17 @@ Any OpenAI-compatible GGUF works; the reference pick is Gemma 3 4B quantized:
 
 ```powershell
 C:\tools\llama.cpp\llama-server.exe -m C:\models\gemma-3-4b-q4km.gguf `
-  --port 8080 -c 8192
+  --port 8080 -c 8192 --n-gpu-layers 99 --no-jinja
 ```
 
-Check health: open `http://localhost:8080/health` (should say no-op ok).
+- `--n-gpu-layers 99` = full VRAM offload (4B Q4 ≈ 2.5 GB + context fits 8 GB).
+- `--no-jinja` is REQUIRED, not optional: llama.cpp b11565's Gemma tool-parser
+  generation 400s intermittently ("Conversation roles must alternate...") on
+  any request shape. Without Jinja there is no parser to generate — and the
+  harness doesn't need it (next section).
+
+Check health: `http://localhost:8080/health` (should say ok). Confirm VRAM use
+with `nvidia-smi` (~3.3 GB = model actually on GPU).
 
 ## 4. Point Lever at it
 
@@ -57,5 +64,11 @@ uv run python evals/runner.py --tasks b01 b02 --seeds 1 --provider local --out e
   for headline claims. ladders stay single-provider for fair comparisons.
 - No thinking/signatures server-side: `count_tokens` is chars//4; token and cost
   columns from local runs are estimates, not bills.
-- Small models may ignore tool schemas or emit malformed arguments — the
-  provider surfaces `_raw` args and clear errors instead of crashing the run.
+- The model ignores OpenAI tool schemas, so the provider uses a text channel:
+  tools are described in prose (`_tool_doc`) and calls return as
+  ` ```tool_code NAME(...) ``` ` fences in three shapes (parenthesized,
+  `k="v"`/`k: "v"` kwargs, bare `NAME arg`). Anything unparseable stays prose.
+  Native `tools` arrays are deliberately NOT sent (see --no-jinja above).
+- Weak-model failure shapes seen live: wrong `old_str` content (no tolerance
+  helps that — needs planning), kwarg-blob-as-single-arg (parser now handles
+  `=`/`:` forms), repetition loops to `max_steps` (needs the B8 loop guard).

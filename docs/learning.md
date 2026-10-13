@@ -382,6 +382,9 @@
 | 20d | `evals/validate_tasks.py`, `scripts/regen_patches.py`, `tests/test_tasks_valid.py` | 2 |
 | 20e | `evals/Dockerfile`, `evals/README.md` | 2 |
 | 21a–f | `providers/gemini.py` (native parts, signatures, thought replay), `core/loop.py` (structured calls, empty retry), `tools/bash.py` (cmd hint), `bug-repo/` fixture | live |
+| 22 | `tools/edit.py` (cascade), `tools/registry.py`, `core/loop.py`, `evals/configs.json` (b1) | 3 |
+| 23–24 | `evals/runner.py` (guards), `evals/analyze.py`, `docs/ablations.md`, `providers/local.py`, `docs/local_model.md` | 2–3 |
+| 25 | `providers/local.py` (fences, docs, no-`tools`), server flags | local |
 
 ---
 
@@ -521,12 +524,79 @@
 | 22 | Parser specificity order (call→thought→text) | `providers/gemini.py:_from_response` | A broad catch-all above the call branch eats the calls |
 | 23 | Empty-turn retry + `stopped_by="empty"` | `core/loop.py` | Model-side flakes must read as flakes, not as harness failure |
 | 24 | Local provider behind the same Protocol | `providers/local.py`, `docs/local_model.md` | $0 dev loops; ladders stay single-provider or they compare models |
+| 25 | Fence protocol + --no-jinja | `providers/local.py`, server flags | Small models get a text tool channel; flaky server features get disabled |
+
+---
+
+## Local-model bring-up (13 Oct 2026) — Step 25
+
+### Step 25a — Server: b11565 CUDA + Gemma 3 4B Q4 on RTX 4070
+
+1. **What:** Downloaded llama.cpp b11565 win-cuda-12.4 + cudart runtime +
+   `gemma-3-4b-it-Q4_K_M.gguf` (2.37 GB) to `D:\tools`, `D:\models` (first
+   attempt stalled silently at 1.4 GB — restarted with Range-resume).
+   Server: `--n-gpu-layers 99` (3.3 GB VRAM confirmed via `nvidia-smi`),
+   `-c 8192`, **`--no-jinja`**. Health `ok`; first `$0` chat reply `ready`.
+2. **Why:** Local $0 dev loop per your directive (Gemini only for final
+   numbers). Full offload because the 4070 fits it easily; 8k context covers
+   B0-size histories.
+3. **Theory:** Own the whole stack for dev (weights, server, harness) so
+   debugging never spends budget and never depends on API weather.
+
+### Step 25b — `--no-jinja`: the 400 class, diagnosed from the server log
+
+1. **What:** Pilot runs 400'd (`invalid_request_error`) while identical-shape
+   probes 200'd — flipping across minutes. Server log blamed Gemma-template
+   tool-parser generation ("Conversation roles must alternate...") on requests
+   WITH and WITHOUT `tools` keys. Bisected system/folded/absent × tools/no-tools
+   (all 200 in good windows) → trigger is server-internal state, not our bytes.
+   Restarted with `--no-jinja` (no Jinja execution → no parser to generate):
+   zero 400s since, across ~20 requests. Provider no longer sends `tools`
+   arrays at all.
+2. **Why:** Chasing request bytes further was sunk cost — the log named the
+   component. `--no-jinja` removes the entire failure class instead of dodging
+   its unknown trigger.
+3. **Theory:** When identical bytes flip outcomes across time, stop diffing
+   requests and read the server's log. And: kill duplicate servers (two
+   instances briefly coexisted after the restart — always verify one PID).
+
+### Step 25c — Fence protocol: meeting the 4B model where it is
+
+1. **What:** Gemma ignores native schemas, emitting ` ```tool_code NAME(...) ``` `
+   in three observed shapes: parenthesized, `k="v"`/`k: "v"` kwargs, bare
+   `NAME arg`. `_parse_fences` accepts exactly these (unknown names/args never
+   become calls; colon-keys must be known schema properties so `C:\a.py` stays
+   a path, not a key). Tools travel as a prose reference (`_tool_doc`) since
+   native arrays are unsendable. 9 offline tests (mock transport).
+2. **Why:** A dev model that can't call tools exercises nothing. Text-channel
+   tools + strict fence parsing turn 0-step stops into real multi-step runs —
+   the failures (wrong content, thrash) then teach the harness, which is the
+   entire point of local dev.
+3. **Theory:** Same principle as tolerant edits: accept the model's natural
+   output shape, validate strictly, never hallucinate intent. Provider-side
+   adaptation (constant across B0..B8) preserves ladder fairness.
+
+### Step 25d — First local signal: B1 wins b01, thrashes b02 ($0)
+
+1. **What:** b01/b02 × b0/b1 pilot: b01-b1 PASS (kwarg fence → exact edit →
+   done in 2 steps); b02-b1 loops 40 steps (colon-kwarg blob misparsed as one
+   arg → repeated "no such file", fixed by colon support; still fails — weak
+   model, wrong content). B1's first measured win anywhere, plus the honest
+   caveat (win came via parseable kwargs on the exact rung, not the cascade).
+   Thrash without a loop guard is now the documented case FOR building B8.
+2. **Why:** Local ladder's job is mechanism evidence and failure taxonomy, not
+   pass rates. Both delivered for $0.
+3. **Theory:** Tolerance multiplies attempts; without a repetition guard it can
+   multiply failure too (b02: 32 edit failures in one run). Features interact —
+   the ladder measures them together for exactly this reason.
 
 ---
 
 ## Next Phases (Not Yet Implemented — For Reference)
 
-- **Phase 3:** Ablation ladder B1–B8 (one feature at a time, measure delta) — B1 tolerant edit first
+- **Phase 3:** Ablation ladder B1–B8 — code + local-model ($0) measurement per rung;
+  Gemini matrices only at the end (spend discipline). B1 built + first local
+  signal recorded; B8 loop guard motivated by observed thrash.
 - **Phase 4:** Policy layer + Web UI (FastAPI + React, context inspector, eval dashboard)
 - **Phase 5:** Credibility run (held-out tasks, SWE-bench subset, results.md)
 - **Phase 6:** MCP client, event-stream adapter, upstream PR, README, video, blog, v1.0 release

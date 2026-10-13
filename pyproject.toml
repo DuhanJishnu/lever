@@ -38,7 +38,7 @@ packages = ["src/lever"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["evals/tasks"]  # task repos intentionally contain bugs (the bugs ARE the tasks)
+extend-exclude = ["evals/tasks", "evals/work", "evals/work_local"]  # task repos intentionally contain bugs; work dirs are throwaway run artifacts
 
 [tool.ruff.lint]
 ignore = ["BLE001", "S110", "S112"]

@@ -39,3 +39,20 @@ real runs REQUIRE `--live` plus an estimate + `[y/N]` confirm (or `--yes`).
 Rule going forward: pilot 1 task × 1 seed → check tokens → approve matrix.
 Open lever: pin `thinking_level` LOW for matrices (verified working, far fewer
 thought tokens) — needs your approval since it changes model behavior.
+
+## Local-model ladder (13 Oct 2026) — Gemma 3 4B, $0
+
+Separate tables per provider — NEVER mixed. Local numbers debug the harness;
+only Gemini numbers support claims.
+
+| config | tasks | pass@1 | steps | notes |
+|---|---|---|---|---|
+| b0 (local) | b01, b02 | 0.00 | 1–3 | fence calls unparsed at first; then thrash/stop |
+| b1 (local) | b01, b02 | 0.50 | 2–40 | b01 PASS via kwarg fence + exact edit; b02 loops to max_steps |
+
+Findings: (1) B1's first measured win anywhere (b01 local) — via parseable
+kwargs, exact rung (cascade itself hasn't fired yet on any model). (2) B1 can
+thrash on weak models (b02: 40 steps, 32 edit failures) — tolerance without a
+loop guard (B8) multiplies attempts, not success. (3) Local pass rates will stay
+near zero; its value is exercising real paths (fence parsing, error rows,
+repetition taxonomy) for $0.
