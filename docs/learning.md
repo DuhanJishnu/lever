@@ -743,7 +743,6 @@
    varies features, and a moving tripwire would confound every comparison.
 
 ### Step 29b — Seed-aliasing methodology bug (found live, fixed)
-
 1. **What:** The b8 pilot's seed-1 rows finished in ~1s with identical steps —
    the response cache keyed (model, messages, tools, config) but NOT seed, so
    seeds 1–2 replayed seed 0 byte-for-byte. Every prior "3-seed" matrix
@@ -759,6 +758,22 @@
    varies the trial (seed) belongs in the key — this is the same class of bug
    as the silently-truncating patches: green gates, wrong science. The Gemini
    ladder will be re-run with real seeds; past CIs should be read as n=1.
+
+### Step 29c — b01 × 5 real seeds (local, $0): first honest local table
+
+b01 × {b0,b1,b2,b3,b8} × seeds 0–4, all live (timings 7–193s prove no aliasing):
+
+| config | pass@1 | steps | tok/run | notes |
+|---|---|---|---|---|
+| b0 | 0.20 | 3.6 | 2138 | 1 pass; lean clean stops otherwise |
+| b1 | 0.60 | 10.6 | 20892 | 3 passes + one 40-step thrash (193s); tolerance widens attempts both ways |
+| b2 | 0.60 | 10.4 | 21186 | same shape as b1 (one thrash) |
+| b3 | 0.00 | 3.0 | 1873 | all 5 stop in 3 steps — map seems to push early give-up on 4B, unproven |
+| b8 | 0.00 | 3.0 | 1873 | identical trajectories to b3; guard correctly silent, still unproven live |
+
+Trap rate falls as pass rises (b0 .4 → b1/b2 .2: solved tasks leave no trap).
+B8 verdict stands: mechanism proven scripted, live demonstration pending — a
+b8-seeds-5–9 hunt runs in background; a caught thrash-cut closes the proof.
 
 ---
 

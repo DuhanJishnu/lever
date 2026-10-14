@@ -75,7 +75,6 @@ and per-run tokens stay an order of magnitude below thrash runs. Real B2
 measurement awaits Gemini pilots.
 
 ## m02 saga (local, $0) — the ladder working as intended
-
 | run | b0 | b1 | b2 | b3 |
 |---|---|---|---|---|
 | first | fail (hallucinated verify) | fail (grep broke) | **PASS** (ambiguity → `replace_all`) | fail (1-step: single-quote fence) |
@@ -92,3 +91,18 @@ measurement awaits Gemini pilots.
   (runner shape; unit tests used absolute tmp paths). Fixed + regression test.
   This bug alone killed two runs' verification steps — a reminder that red
   eval traces find harness bugs unit tests miss.
+
+## b01 x 5 real seeds (local, $0) -- first honest local table
+
+Raw JSONL is temp (see learning log); the committed record is this table.
+
+| config | pass@1 | steps | tok/run | notes |
+|---|---|---|---|---|
+| b0 | 0.20 | 3.6 | 2138 | lean clean stops |
+| b1 | 0.60 | 10.6 | 20892 | 3 passes + one 40-step thrash |
+| b2 | 0.60 | 10.4 | 21186 | same shape (one thrash) |
+| b3 | 0.00 | 3.0 | 1873 | all stop in 3 steps; map early give-up unproven |
+| b8 | 0.00 | 3.0 | 1873 | same trajectories as b3; guard silent (nothing to catch) |
+
+B8 live proof pending: b8 seeds 5-9 hunting a thrash-cut. Mechanism proven by
+scripted tests; KEEP on mechanism meanwhile.
