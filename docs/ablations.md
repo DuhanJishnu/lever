@@ -117,3 +117,18 @@ shows elided markers, events keep full text).
 long histories; local runs are too short to engage it. The honest B4 test
 needs a 15+ step run under b4 (or the Gemini matrix, where histories run
 longer). No-harm proven: b4 never diverges from b3.
+
+## B5 local pilot (14 Oct 2026) -- b02 x all configs, 2 seeds
+
+b5 == b4 == b3 == b8 everywhere (short-run no-op, as designed): no run
+exceeded 8 steps, far below the 70%-of-60k tripwire (~42k est tokens vs
+~2-6k observed). Compaction cannot fire on toy tasks -- its test is the
+deterministic integration suite, which proves pinning, summarization shape,
+event emission, and the no-op case.
+
+Notable side observation: b1 went 2/2 on b02 (first b02 wins anywhere) --
+small-model variance cuts both ways.
+
+**Decision: KEEP on mechanism, UNMEASURED live.** The honest B5 test is a
+100k+ history (per the plan's own acceptance); none of our tasks produce
+one. On real long runs the tripwire + event + UI meter path is fully wired.

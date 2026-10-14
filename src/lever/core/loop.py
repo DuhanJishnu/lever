@@ -124,6 +124,7 @@ async def run_loop(
     messages = fresh_context(task)
     want_map = bool(getattr(config, "repo_map", False))
     want_mask = bool(getattr(config, "observation_masking", False))
+    want_compact = bool(getattr(config, "compaction", False))
     touched: set[str] = set()
     if want_map:
         from ..context.repomap import build_repomap
@@ -153,6 +154,18 @@ async def run_loop(
                 stop_reason = guard.reason
                 stopped_by = "guardrail" if "max_steps" not in guard.reason else "max_steps"
                 break
+
+            if want_compact:
+                from ..context.compaction import compact_history, needs_compaction
+
+                budget = int(config.context_budget_tokens or 0)
+                if needs_compaction(estimate_tokens(messages), budget):
+                    messages, info = await compact_history(
+                        messages, provider, config)
+                    if info is not None:
+                        store.append(Event(
+                            session_id=session.session_id, seq=0,
+                            type="context_compacted", data=info))
 
             ctx_size = estimate_tokens(messages)
             model_name = str(getattr(provider, "model", "fake"))

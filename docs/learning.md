@@ -390,6 +390,7 @@
 | 28 | `tools/grep.py` (resolve fix), `providers/local.py` (quote shapes), `tests/test_tools.py` + `test_providers.py` | 3–local |
 | 29 | `core/guards.py` (tracker+factories), `core/loop.py` (wire), `core/events.py` (nudge event), `core/config.py` + providers + runner (seed), `tests/test_guards.py` | 8 |
 | 30 | `context/masking.py` (new), `core/loop.py` (send path), `tests/test_repomap.py` + `test_loop.py`, `evals/configs.json` (b4) | 4 |
+| 31 | `context/compaction.py` (new), `core/loop.py` (tripwire+event), `tests/test_compaction.py`, `evals/configs.json` (b5) | 5 |
 
 ---
 
@@ -536,6 +537,8 @@
 | 29 | B8 loop guard (guards + tracker) | `core/guards.py`, `core/loop.py`, seed plumbing | Stop thrash early; seeds must be real replicates |
 | 30 | Fence multi-line + regex escaping | `providers/local.py` | Parse whole block first; test backslash inputs |
 | 31 | B4 masking (keep-6 + placeholder) | `context/masking.py`, `core/loop.py` | No-op when short; integration test proves channel |
+| 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
+| 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 
 ---
 
@@ -817,6 +820,30 @@ b01 × {b0,b1,b2,b3,b8} × seeds 0–4, all live (timings 7–193s prove no alia
 Trap rate falls as pass rises (b0 .4 → b1/b2 .2: solved tasks leave no trap).
 B8 verdict stands: mechanism proven scripted, live demonstration pending — a
 b8-seeds-5–9 hunt runs in background; a caught thrash-cut closes the proof.
+
+---
+
+## Phase 3: B5 compaction (14 Oct 2026) — Step 32
+
+### Step 32 — Tiers + tripwire + state notes (`context/compaction.py`)
+
+1. **What:** Explicit tiers (pinned = system+task, tail = last 4 msgs, middle =
+   compactable); 70%-of-budget tripwire on the cheap local estimate (NOT a
+   metered count call per turn — documented deviation, avoids doubling eval
+   spend); LLM summary into the fixed 6-heading schema via direct provider
+   call; ladder rung 2 (truncate kept outputs) if still over; `context_compacted`
+   {before, after, dropped} event for the UI meter. `b5` = b4 + flag.
+   Tests: threshold math, tier split, pin-preserving compact with fat middle,
+   no-op without middle, deterministic loop event test (forced tripwire,
+   script aligned to the 7-message middle rule — found by tracing, not luck).
+2. **Why:** Long runs die at context limits; compaction is the survival
+   mechanism. Pinned-never-touched is the guarantee that makes it safe to run
+   unattended.
+3. **Theory:** Summarization target is fixed-schema (not free prose) so the
+   note is machine-usable downstream and comparable across runs. Live: b5 ==
+   b4 everywhere (no run exceeded 8 steps vs the ~42k-token tripwire) — KEEP
+   on mechanism, UNMEASURED live. The honest B5 test is a 100k+ history; toy
+   tasks can't produce one.
 
 ---
 

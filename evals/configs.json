@@ -94,5 +94,21 @@
     "loop_guard": false,
     "best_of_n": 1,
     "prompt_version": "v1"
+  },
+  "b5": {
+    "temperature": 0.2,
+    "thinking_budget": null,
+    "max_steps": 40,
+    "context_budget_tokens": 60000,
+    "tolerant_edit": true,
+    "repo_map": true,
+    "output_truncation": true,
+    "observation_masking": true,
+    "compaction": true,
+    "verify_loop": false,
+    "planner_prompt": false,
+    "loop_guard": false,
+    "best_of_n": 1,
+    "prompt_version": "v1"
   }
 }
