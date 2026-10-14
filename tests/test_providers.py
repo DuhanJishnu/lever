@@ -319,6 +319,28 @@ def test_parse_fences_strictness():
             _parse_fences("```tool_code\nread_file(path='C:\\q\\a.py')\n```",
                           tools)] == [
         ("read_file", {"path": "C:\\q\\a.py"})]
+    # backtick-quoted kwarg values (observed live)
+    backtick_tools = [
+        {"name": "edit_file", "description": "e",
+         "parameters": {"type": "object",
+                        "properties": {"path": {"type": "string"},
+                                       "old_str": {"type": "string"},
+                                       "new_str": {"type": "string"}},
+                        "required": ["path", "old_str", "new_str"]}},
+    ]
+    assert [(c.name, c.args) for c in
+            _parse_fences("```tool_code\nedit_file total.py, old `sum(range(n))`, "
+                          "new `sum(range(n + 1))`\n```", backtick_tools)] == [
+        ("edit_file", {"path": "total.py", "old_str": "sum(range(n))",
+                       "new_str": "sum(range(n + 1))"})]
+    # unknown tool names never resolve, even with good args
+    assert _parse_fences("```tool_code\nread_file(path='a.py')\n```",
+                         backtick_tools) == []
+    from lever.providers.local import _resolve_keys
+    assert _resolve_keys(["old", "new"], {"path", "old_str", "new_str"}) == {
+        "old": "old_str", "new": "new_str"}
+    assert _resolve_keys(["p"], {"path", "pattern"}) is None  # ambiguous
+    assert _resolve_keys(["zzz"], {"path"}) is None  # unknown
     # multi-line arguments (write_file with embedded newlines, observed live)
     assert [(c.name, c.args) for c in
             _parse_fences("```tool_code\nwrite_file(path=\"a.py\", "

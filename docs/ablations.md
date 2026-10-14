@@ -151,3 +151,18 @@ covered by the same collect-from-traces rule.
 
 **Decision: KEEP, mechanism proven live.** B6 is the first rung that changes
 run SHAPE observably (19 steps vs 4) rather than just passing/failing.
+
+## B7 local pilot (14 Oct 2026) -- b01/b02 x all 8 configs: planner adopted, todo ignored
+
+b7: 0.00 both tasks. Mechanism split: the model visibly follows the v2
+WORKFLOW shape (numbered EXPLORE/PLAN/EDIT/VERIFY prose, plan-first reads)
+but NEVER calls the `todo` tool -- scratchpad mechanism unexercised. Prompt
+adherence is partial: structure yes, tool no.
+
+Fence coverage grows again (all from red traces): backtick-quoted kwarg
+values, positional+kwarg-tail mixes, and unambiguous key abbreviations
+(old -> old_str; ambiguous/unknown rejected). Fifth and sixth shapes.
+
+**Decision: KEEP on mechanism, PARTIAL live.** Workflow shape adopted;
+scratchpad and outcome unproven. The planner delta needs a model that uses
+tools-as-instructed (Gemini pilots) or a stronger local model.

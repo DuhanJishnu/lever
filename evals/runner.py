@@ -247,6 +247,8 @@ async def _main_async(args: argparse.Namespace, configs: dict) -> None:
         for line in out.read_text(encoding="utf-8").splitlines():
             try:
                 r = json.loads(line)
+                if r.get("error"):
+                    continue  # error rows are retried, never resumed
                 done.add((r["task"], r["config"], r["seed"]))
             except (json.JSONDecodeError, KeyError):
                 continue

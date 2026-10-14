@@ -283,12 +283,66 @@ def _parse_call_line(
         return name, _single_arg(index[name], raw)
     m = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\s+(.+?)\s*", line, re.DOTALL)
     if m and m.group(1) in index:
-        name = m.group(1)
-        kw = _parse_kwargs(m.group(2), schemas.get(name, (None, set()))[1])
+        name, rest = m.group(1), m.group(2)
+        props = schemas.get(name, (None, set()))[1]
+        # leading positional + kwarg tail ("edit_file total.py, old `..`")
+        pm = re.fullmatch(r"([^,=:]+?)\s*,\s*(.+)", rest, re.DOTALL)
+        if pm:
+            first_arg = _single_arg(index[name], pm.group(1))
+            kw = _parse_kwargs(pm.group(2), props)
+            if kw is None:
+                kw = _parse_space_kwargs(pm.group(2), props)
+            if first_arg and kw is not None:
+                merged = dict(first_arg)
+                merged.update(kw)
+                return name, merged
+        kw = _parse_kwargs(rest, props)
         if kw is not None:
             return name, kw
-        return name, _single_arg(index[name], m.group(2))
+        return name, _single_arg(index[name], rest)
     return None, None
+
+
+def _resolve_keys(keys: list[str], known: set[str]) -> dict[str, str] | None:
+    """Map abbreviated keys to unique schema properties (old -> old_str).
+    Returns None unless EVERY key resolves to exactly one property."""
+    mapping = {}
+    for k in keys:
+        cands = [p for p in known if p == k or p.startswith(k) or k.startswith(p)]
+        if len(cands) != 1:
+            return None
+        mapping[k] = cands[0]
+    return mapping
+
+
+def _parse_space_kwargs(rest: str, known: set[str]) -> dict[str, Any] | None:
+    """Space-separated kwargs without separators: old `v`, new `w`.
+    Values must be quoted (double/single/backtick); keys must resolve."""
+    import re
+
+    pairs = re.findall(
+        r"([A-Za-z_][A-Za-z0-9_]*)\s+(\"[^\"]*\"|'[^']*'|`[^`]*`)",
+        rest)
+    if not pairs:
+        return None
+    check = re.sub(
+        r"[A-Za-z_][A-Za-z0-9_]*\s+(\"[^\"]*\"|'[^']*'|`[^`]*`)",
+        "", rest).strip(" ,")
+    if check:
+        return None
+    mapping = _resolve_keys([k for k, _ in pairs], known)
+    if mapping is None:
+        return None
+    args: dict[str, Any] = {}
+    for k, v in pairs:
+        if v.startswith('"'):
+            try:
+                args[mapping[k]] = json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        else:
+            args[mapping[k]] = _unescape(v[1:-1])
+    return args
 
 
 def _parse_kwargs(raw: str, known: set[str]) -> dict[str, Any] | None:
@@ -301,30 +355,33 @@ def _parse_kwargs(raw: str, known: set[str]) -> dict[str, Any] | None:
     for sep in ("=", ":"):
         pairs = re.findall(
             r"([A-Za-z_][A-Za-z0-9_]*)\s*" + re.escape(sep) +
-            r"\s*(\"[^\"]*\"|'[^']*'|[^\s,]+)"
+            r"\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\s,]+)"
             r"\s*(?:,|$)", raw)
         if not pairs:
             continue
         check = re.sub(
             r"[A-Za-z_][A-Za-z0-9_]*\s*" + re.escape(sep) +
-            r"\s*(\"[^\"]*\"|'[^']*'|[^\s,]+)"
+            r"\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\s,]+)"
             r"\s*(?:,|$)", "", raw).strip()
-        if check or any(k not in known for k, _ in pairs):
+        if check:
+            continue
+        mapping = _resolve_keys([k for k, _ in pairs], known)
+        if mapping is None:
             continue
         args: dict[str, Any] = {}
         for k, v in pairs:
             if v.startswith('"'):
                 try:
-                    args[k] = json.loads(v)
+                    args[mapping[k]] = json.loads(v)
                 except (json.JSONDecodeError, ValueError):
                     break
-            elif v.startswith("'"):
-                args[k] = _unescape(v[1:-1])
+            elif v.startswith(("'", "`")):
+                args[mapping[k]] = _unescape(v[1:-1])
             else:
                 try:
-                    args[k] = int(v)
+                    args[mapping[k]] = int(v)
                 except ValueError:
-                    args[k] = v
+                    args[mapping[k]] = v
         else:
             return args
     return None

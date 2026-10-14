@@ -127,7 +127,7 @@ def make_charts(rows: list[dict], summary: dict, out_dir: Path) -> list[str]:
     plt.close(fig)
     made.append(str(p1))
 
-    tasks, cfgs, grid = heatmap_data(rows)
+    tasks, cfgs, grid = heatmap_data([r for r in rows if not r.get("error")])
     fig, ax = plt.subplots(figsize=(max(6, len(cfgs)), max(4, 0.35 * len(tasks) + 1)))
     im = ax.imshow(grid, aspect="auto", vmin=0, vmax=1)
     ax.set_xticks(range(len(cfgs)), cfgs)

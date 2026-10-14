@@ -901,7 +901,14 @@ turns, single-quote unescape fix. First rung with live mechanism proof.)
    grammar weak models otherwise invent (cf. fence shapes). B7's delta, if
    any, measures planning, not plumbing.
 
-### Step 34b — Local pilot: running in background (results pending)
+### Step 34b — Local pilot: planner adopted, scratchpad ignored (results)
+
+b01/b02 x all 8 configs ($0): b7 goes 0.00, but the v2 WORKFLOW visibly lands
+(numbered EXPLORE/PLAN/EDIT/VERIFY prose, plan-first reads) while the `todo`
+tool is never called. Sixth fence shape covered (backticks), positional-mix
+parsing, unambiguous key abbreviations (`old` -> `old_str`, ambiguous
+rejected). Full table in `docs/ablations.md`. B7: workflow shape adopted,
+scratchpad + outcome unproven — needs Gemini or a stronger local model.
 
 ---
 
