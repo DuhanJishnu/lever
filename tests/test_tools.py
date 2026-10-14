@@ -171,6 +171,21 @@ async def test_b0_stays_exact(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_grep_relative_workspace_root(tmp_path, monkeypatch):
+    """Regression: grep crashed with relative roots (rglob absolute vs
+    relative_to relative) — the exact shape the eval runner uses."""
+    from pathlib import Path
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "ws").mkdir()
+    (tmp_path / "ws" / "m.py").write_text("def foo():\n    pass\n", encoding="utf-8")
+    reg = create_tools(Path("ws"))
+    out = await reg.run("grep", {"pattern": "def foo"})
+    assert "m.py:1" in out
+    assert "not in the subpath" not in out
+
+
+@pytest.mark.asyncio
 async def test_b2_ranged_read(tmp_path):
     reg = _trunc(tmp_path)
     (tmp_path / "big.py").write_text(

@@ -289,12 +289,14 @@ def _parse_kwargs(raw: str, known: set[str]) -> dict[str, Any] | None:
     for sep in ("=", ":"):
         pairs = re.findall(
             r"([A-Za-z_][A-Za-z0-9_]*)\s*" + re.escape(sep) +
-            r"\s*(\"(?:[^\"\\\\]|\\\\.)*\"|[^\s,]+)\s*(?:,|$)", raw)
+            r"\s*(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|[^\s,]+)"
+            r"\s*(?:,|$)", raw)
         if not pairs:
             continue
         check = re.sub(
             r"[A-Za-z_][A-Za-z0-9_]*\s*" + re.escape(sep) +
-            r"\s*(\"(?:[^\"\\\\]|\\\\.)*\"|[^\s,]+)\s*(?:,|$)", "", raw).strip()
+            r"\s*(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|[^\s,]+)"
+            r"\s*(?:,|$)", "", raw).strip()
         if check or any(k not in known for k, _ in pairs):
             continue
         args: dict[str, Any] = {}
@@ -304,6 +306,8 @@ def _parse_kwargs(raw: str, known: set[str]) -> dict[str, Any] | None:
                     args[k] = json.loads(v)
                 except (json.JSONDecodeError, ValueError):
                     break
+            elif v.startswith("'"):
+                args[k] = v[1:-1].replace("\\'", "'").replace("\\\\", "\\")
             else:
                 try:
                     args[k] = int(v)

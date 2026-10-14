@@ -387,6 +387,7 @@
 | 25 | `providers/local.py` (fences, docs, no-`tools`), server flags | local |
 | 26 | `tools/base.py` (head/tail), `tools/fs.py` (ranged read), `tools/registry.py` (flag), `evals/configs.json` (b2) | 3 |
 | 27 | `context/repomap.py` (new pkg), `core/loop.py` (pin + refresh), `evals/configs.json` (b3), `tests/test_repomap.py` | 3 |
+| 28 | `tools/grep.py` (resolve fix), `providers/local.py` (quote shapes), `tests/test_tools.py` + `test_providers.py` | 3–local |
 
 ---
 
@@ -529,6 +530,7 @@
 | 25 | Fence protocol + --no-jinja | `providers/local.py`, server flags | Small models get a text tool channel; flaky server features get disabled |
 | 26 | B2 truncation + ranged reads | `tools/base.py`, `tools/fs.py`, `tools/registry.py` | Bounded context per call; second keep-on-mechanism rung |
 | 27 | B3 repo map (ast + PageRank) | `context/repomap.py`, `core/loop.py` (pin + refresh) | Structure-first orientation; pure function, cheap rebuilds |
+| 28 | Grep path fix + fence quotes | `tools/grep.py`, `providers/local.py` | Red traces find unit-test-blind bugs; cover observed shapes |
 
 ---
 
@@ -673,6 +675,42 @@
 3. **Theory:** Orientation features pay off with scale — evaluating a map on a
    2-file repo is like testing a search engine on one document. Say so
    plainly rather than claiming a win.
+
+---
+
+## Red traces find bugs + fence hardening (14 Oct 2026) — Step 28
+
+### Step 28a — Grep `relative_to` crash (all configs, found in m02 traces)
+
+1. **What:** Every m02 run's verification `grep` died with `'...alpha.py' is
+   not in the subpath of 'evals\\work_local3\\...'` — `rglob` yields absolute
+   paths while the workspace root stayed relative (the runner's shape; unit
+   tests used absolute tmp paths, hiding it). One-line fix (`root.resolve()`
+   in `make_grep_tool`) + regression test with a relative root. After the fix
+   m02 passes on b0/b2/b3 across reruns.
+2. **Why:** Broken verification made models conclude false things ("renaming
+   was not fully successful", hallucinated success) — a corrupted feedback
+   channel poisons every config equally. Eval traces catch what unit tests
+   can't: the exact production shape.
+3. **Theory:** Path bugs hide behind absolute-path tests. Always test tools
+   with the same relative/absolute shapes the runner uses.
+
+### Step 28b — Single-quote fences + m02 ledger
+
+1. **What:** b3's m02 run stopped in 1 step: the model wrote
+   `edit_file(path='alpha.py', ...)` with SINGLE quotes, unparsed. Extended
+   kwarg values to `'...'` (colon keys already schema-gated, so `C:\a.py`
+   still parses as a path). Rerun: **m02-b3 PASS in 7 steps**. m02 ledger to
+   date — b0 1/2, b1 0/2, b2 1/2, b3 1/1: variance, not ranking; every rung's
+   machinery (ambiguity→`replace_all`, quote parsing, grep verify) proven live
+   at least once.
+2. **Why:** Third observed fence shape; each shape the parser learns turns
+   1-step stops into multi-step runs. Strictness preserved (unknown
+   names/keys never become calls).
+3. **Theory:** Weak-model output coverage is empirical — collect shapes from
+   red traces, accept exactly those. (Also recorded: b2's m02 win came via the
+   ambiguity error suggesting `replace_all`, complied on the next turn — the
+   B1 message design working as specified.)
 
 ---
 

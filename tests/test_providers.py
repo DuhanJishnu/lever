@@ -301,6 +301,10 @@ def test_parse_fences_strictness():
     assert [(c.name, c.args) for c in
             _parse_fences('```tool_code\nread_file(path="a.py")\n```', tools)] == [
         ("read_file", {"path": "a.py"})]
+    # single quotes too (observed live)
+    assert [(c.name, c.args) for c in
+            _parse_fences("```tool_code\nread_file(path='a.py')\n```", tools)] == [
+        ("read_file", {"path": "a.py"})]
     # garbage stays prose
     assert _parse_fences('```tool_code\nread_file((()))\n```', tools) == []
     # no fence -> no calls (never hallucinate from prose)

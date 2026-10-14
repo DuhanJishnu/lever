@@ -73,3 +73,22 @@ pass→thrash between days with zero code change. What the pilot DOES show:
 truncation+ranged-reads didn't break completion (both b2 runs stop cleanly),
 and per-run tokens stay an order of magnitude below thrash runs. Real B2
 measurement awaits Gemini pilots.
+
+## m02 saga (local, $0) — the ladder working as intended
+
+| run | b0 | b1 | b2 | b3 |
+|---|---|---|---|---|
+| first | fail (hallucinated verify) | fail (grep broke) | **PASS** (ambiguity → `replace_all`) | fail (1-step: single-quote fence) |
+| second | **PASS** | fail | fail | **PASS** (after quote fix) |
+
+- B1's ambiguity error → model sets `replace_all=true` → m02 solved. The
+  error-message design working exactly as specified.
+- B3's first signal: single-quote fences unparsed → 1-step stop; after the
+  parser fix, 7-step pass. (Map contribution unproven at 2-file scale —
+  the pass used reads + edits, map presence only.)
+- Every config has now solved m02 at least once except b1 (0/2) — pure
+  small-model variance, not a ranking.
+- **Grep path bug (all configs)**: `relative_to` crashed on relative roots
+  (runner shape; unit tests used absolute tmp paths). Fixed + regression test.
+  This bug alone killed two runs' verification steps — a reminder that red
+  eval traces find harness bugs unit tests miss.

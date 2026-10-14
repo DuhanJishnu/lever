@@ -14,6 +14,10 @@ MAX_MATCHES = 50
 
 
 def make_grep_tool(root: Path) -> Tool:
+    # Absolute once: rglob results are absolute, and relative_to() below
+    # needs a matching base (relative root + absolute file = ValueError).
+    root = root.resolve()
+
     async def _run(args: dict[str, Any]) -> str:
         try:
             rx = re.compile(str(args.get("pattern", "")))
