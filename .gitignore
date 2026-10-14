@@ -6,8 +6,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 evals/results/
-evals/work/
-evals/work_local/
+evals/work*/
 lever_cache/
 .lever_cache.jsonl
 .lever_cache-live*.jsonl

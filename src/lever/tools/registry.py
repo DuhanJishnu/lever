@@ -20,11 +20,12 @@ from .grep import make_grep_tool
 def create_tools(workspace: Path | str, config: Any | None = None) -> ToolRegistry:
     root = Path(workspace)
     tolerant = bool(getattr(config, "tolerant_edit", False))
+    trunc = bool(getattr(config, "output_truncation", False))
     tools = [
-        make_read_tool(root),
+        make_read_tool(root, ranged=trunc),
         make_write_tool(root),
         make_edit_tool(root, tolerant=tolerant),
         make_grep_tool(root),
         make_bash_tool(root),
     ]
-    return ToolRegistry(by_name={t.name: t for t in tools})
+    return ToolRegistry(by_name={t.name: t for t in tools}, truncate=trunc)

@@ -56,3 +56,20 @@ thrash on weak models (b02: 40 steps, 32 edit failures) — tolerance without a
 loop guard (B8) multiplies attempts, not success. (3) Local pass rates will stay
 near zero; its value is exercising real paths (fence parsing, error rows,
 repetition taxonomy) for $0.
+
+## B2 local pilot (14 Oct 2026) — b01/b02 × b0/b1/b2, 1 seed
+
+Results file: `evals/results/local_b1b2.jsonl`.
+
+| config | pass@1 | steps | tok/run | notes |
+|---|---|---|---|---|
+| b0 | 0.50 | 3.0 | 1939 | b01 passed this time (nondeterminism), b02 failed clean |
+| b1 | 0.00 | 23.0 | 51486 | b01 thrashed 40 steps (223s); same task passed yesterday |
+| b2 | 0.00 | 4.0 | 2970 | both runs completed, no thrash, no breakage |
+
+**Decision: KEEP on mechanism, UNMEASURED on outcome** (same status as B1).
+n=2 on a flappy 4B model cannot discriminate configs — b01/b1 flipped
+pass→thrash between days with zero code change. What the pilot DOES show:
+truncation+ranged-reads didn't break completion (both b2 runs stop cleanly),
+and per-run tokens stay an order of magnitude below thrash runs. Real B2
+measurement awaits Gemini pilots.

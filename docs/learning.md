@@ -385,6 +385,7 @@
 | 22 | `tools/edit.py` (cascade), `tools/registry.py`, `core/loop.py`, `evals/configs.json` (b1) | 3 |
 | 23–24 | `evals/runner.py` (guards), `evals/analyze.py`, `docs/ablations.md`, `providers/local.py`, `docs/local_model.md` | 2–3 |
 | 25 | `providers/local.py` (fences, docs, no-`tools`), server flags | local |
+| 26 | `tools/base.py` (head/tail), `tools/fs.py` (ranged read), `tools/registry.py` (flag), `evals/configs.json` (b2) | 3 |
 
 ---
 
@@ -525,6 +526,7 @@
 | 23 | Empty-turn retry + `stopped_by="empty"` | `core/loop.py` | Model-side flakes must read as flakes, not as harness failure |
 | 24 | Local provider behind the same Protocol | `providers/local.py`, `docs/local_model.md` | $0 dev loops; ladders stay single-provider or they compare models |
 | 25 | Fence protocol + --no-jinja | `providers/local.py`, server flags | Small models get a text tool channel; flaky server features get disabled |
+| 26 | B2 truncation + ranged reads | `tools/base.py`, `tools/fs.py`, `tools/registry.py` | Bounded context per call; second keep-on-mechanism rung |
 
 ---
 
@@ -592,11 +594,49 @@
 
 ---
 
+## Phase 3: B2 truncation + ranged reads (14 Oct 2026) — Step 26
+
+### Step 26a — Implementation (`tools/base.py`, `fs.py`, `registry.py`)
+
+1. **What:** `truncate_lines()` (B2): head 100 + tail 50 lines with an explicit
+   `[... N lines omitted ...]` marker — unlike B0's char cap it preserves the
+   ending (exit codes, summaries, failing asserts). `ToolRegistry(truncate)`
+   flag switches the finishing path. `read_file` gains `start_line`/`end_line`
+   (1-based, schema-advertised only when the flag is on); default = first 100
+   lines + `lines s-e of total` header + `re-read with start_line=N` pointer;
+   small files return whole (no wrapper); inverted ranges error. Grep already
+   met the spec (50 max, file:line + context) — no change. `configs.json`
+   gains `b2` = b1 + `output_truncation`. 3 new unit tests (default window,
+   explicit range, head/tail marker, B0 unchanged).
+2. **Why:** b02-style thrash burns context on repeated full-file reads and giant
+   outputs; bounding each call's context is the cheapest token lever. Ranged
+   reads also teach decomposition (read → locate → re-read) instead of dumping.
+3. **Theory:** Errors cluster at head (usage) and tail (verdicts); middles are
+   expendable — the 100/50 asymmetry encodes that. Defaults matter: the
+   first-100 + pointer shape makes the *right* next call obvious to a weak
+   model, which is interface design, not just truncation.
+
+### Step 26b — Local pilot: no breakage, no thrash ($0)
+
+1. **What:** b01/b02 × b0/b1/b2: b2 goes 0.00 with 4.0 steps and ~3k tok/run —
+   both runs stop cleanly. Same sample shows b1 thrashing 40 steps/51k tokens
+   on the task it passed yesterday: n=2 on a flappy 4B model discriminates
+   nothing. Decision: **KEEP on mechanism, UNMEASURED** (row in
+   `docs/ablations.md`). Real measurement awaits Gemini pilots.
+2. **Why:** Record the rung honestly: mechanism proven by unit tests, outcome
+   unmeasurable locally. The pilot's real value is negative control — B2
+   changed the observation channel without breaking completion.
+3. **Theory:** Same status as B1 for the same reason (ceiling/noise, not the
+   feature). The ladder's keep-on-mechanism rows are IOUs the Gemini matrix
+   redeems at the end — tracked explicitly so none is forgotten.
+
+---
+
 ## Next Phases (Not Yet Implemented — For Reference)
 
 - **Phase 3:** Ablation ladder B1–B8 — code + local-model ($0) measurement per rung;
-  Gemini matrices only at the end (spend discipline). B1 built + first local
-  signal recorded; B8 loop guard motivated by observed thrash.
+  Gemini matrices only at the end (spend discipline). B1+B2 built, both
+  keep-on-mechanism; B8 loop guard motivated by observed thrash.
 - **Phase 4:** Policy layer + Web UI (FastAPI + React, context inspector, eval dashboard)
 - **Phase 5:** Credibility run (held-out tasks, SWE-bench subset, results.md)
 - **Phase 6:** MCP client, event-stream adapter, upstream PR, README, video, blog, v1.0 release

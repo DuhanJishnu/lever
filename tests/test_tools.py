@@ -12,6 +12,10 @@ def _tolerant(tmp_path):
     return create_tools(tmp_path, SimpleNamespace(tolerant_edit=True))
 
 
+def _trunc(tmp_path):
+    return create_tools(tmp_path, SimpleNamespace(output_truncation=True))
+
+
 def test_path_escape_rejected(tmp_path):
     reg = create_tools(tmp_path)
     (tmp_path / "ok.txt").write_text("hello", encoding="utf-8")
@@ -164,3 +168,47 @@ async def test_b0_stays_exact(tmp_path):
                                       "new_str": "a = 2"})
     assert "exact match required" in out
     assert (tmp_path / "f.py").read_text(encoding="utf-8") == "a = 1\n"
+
+
+@pytest.mark.asyncio
+async def test_b2_ranged_read(tmp_path):
+    reg = _trunc(tmp_path)
+    (tmp_path / "big.py").write_text(
+        "\n".join(f"line {i}" for i in range(1, 251)) + "\n", encoding="utf-8")
+    # default: first 100 + pointer
+    out = await reg.run("read_file", {"path": "big.py"})
+    assert "lines 1-100 of 250" in out and "start_line=101" in out
+    assert "line 100\n" in out and "line 101\n" not in out
+    # explicit range
+    out2 = await reg.run("read_file", {"path": "big.py",
+                                       "start_line": 200, "end_line": 250})
+    assert "lines 200-250 of 250" in out2 and "line 200" in out2
+    # small file: whole content, no wrapper
+    (tmp_path / "small.py").write_text("a = 1\n", encoding="utf-8")
+    assert await reg.run("read_file", {"path": "small.py"}) == "a = 1\n"
+    # inverted range
+    out3 = await reg.run("read_file", {"path": "big.py",
+                                       "start_line": 50, "end_line": 10})
+    assert "empty range" in out3
+
+
+@pytest.mark.asyncio
+async def test_b2_head_tail_truncation(tmp_path, monkeypatch):
+    from lever.tools import base
+
+    monkeypatch.setattr(base, "HEAD_LINES", 10)
+    monkeypatch.setattr(base, "TAIL_LINES", 5)
+    reg = _trunc(tmp_path)
+    (tmp_path / "out.txt").write_text(
+        "\n".join(f"L{i}" for i in range(50)) + "\n", encoding="utf-8")
+    out = await reg.run("read_file", {"path": "out.txt",
+                                      "start_line": 1, "end_line": 50})
+    assert "lines omitted" in out
+    assert "L0" in out and "L49" in out and "L25" not in out
+
+
+@pytest.mark.asyncio
+async def test_b0_read_unchanged(tmp_path):
+    reg = create_tools(tmp_path)
+    (tmp_path / "f.py").write_text("a = 1\nb = 2\n", encoding="utf-8")
+    assert await reg.run("read_file", {"path": "f.py"}) == "a = 1\nb = 2\n"

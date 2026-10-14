@@ -16,6 +16,12 @@ from typing import Any
 # every config (B0..B8) caps tool output; B2 only makes the cap smarter (head/tail).
 MAX_OUTPUT_CHARS = 20_000
 
+# B2 head/tail budget (lines). Rationale: errors cluster at the head (usage,
+# tracebacks start) and the tail (final result, failing assert); the middle
+# of giant outputs is the most expendable context per token.
+HEAD_LINES = 100
+TAIL_LINES = 50
+
 
 def cap_output(text: str) -> str:
     if len(text) <= MAX_OUTPUT_CHARS:
@@ -24,6 +30,22 @@ def cap_output(text: str) -> str:
         text[:MAX_OUTPUT_CHARS]
         + f"\n[... output truncated at {MAX_OUTPUT_CHARS} chars (B0 coarse cap) ...]"
     )
+
+
+def truncate_lines(text: str) -> str:
+    """B2: keep head + tail with an explicit omission marker.
+
+    Unlike cap_output (which amputates the tail), this preserves the ending —
+    where exit codes, summaries, and failing asserts live.
+    """
+    lines = text.splitlines()
+    if len(lines) <= HEAD_LINES + TAIL_LINES:
+        return cap_output(text)  # short enough: char cap still applies
+    omitted = len(lines) - HEAD_LINES - TAIL_LINES
+    kept = (lines[:HEAD_LINES]
+            + [f"[... {omitted} lines omitted (head/tail truncation) ...]"]
+            + lines[-TAIL_LINES:])
+    return cap_output("\n".join(kept))
 
 
 def resolve_safe(root: Path, user_path: str) -> Path:
@@ -57,17 +79,21 @@ class Tool:
 @dataclass
 class ToolRegistry:
     by_name: dict[str, Tool] = field(default_factory=dict)
+    truncate: bool = False  # B2 output_truncation: head/tail instead of coarse cap
 
     @property
     def definitions(self) -> list[dict[str, Any]]:
         return [t.definition for t in self.by_name.values()]
 
+    def _finish(self, text: str) -> str:
+        return truncate_lines(text) if self.truncate else cap_output(text)
+
     async def run(self, name: str, args: dict[str, Any] | None) -> str:
         tool = self.by_name.get(name)
         if tool is None:
             known = ", ".join(sorted(self.by_name)) or "(none)"
-            return cap_output(f'Unknown tool: "{name}". Available: {known}.')
+            return self._finish(f'Unknown tool: "{name}". Available: {known}.')
         try:
-            return cap_output(await tool.execute(args or {}))
+            return self._finish(await tool.execute(args or {}))
         except Exception as e:  # model-friendly error, never a stack trace
-            return cap_output(f"Error in {name}: {e}")
+            return self._finish(f"Error in {name}: {e}")
