@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ..policy.engine import ProposedCall
 from .config import HarnessConfig
 from .events import Event
 from .guards import (
@@ -99,6 +100,8 @@ async def run_loop(
     cache: Any | None = None,  # ResponseCache — skips repeat API calls
     tools: Any | None = None,  # ToolRegistry — created from session if omitted
     seed: int = 0,  # sampling seed: isolates cache entries per replicate
+    policy: Any | None = None,  # PolicyEngine — None means no policy layer
+    approve: Any | None = None,  # async (request) -> bool; None = auto-approve
 ) -> LoopResult:
     import time as _time
 
@@ -272,7 +275,8 @@ async def run_loop(
                 store.append(Event(session_id=session.session_id, seq=0,
                                    type="tool_call",
                                    data={"name": name, "args": cargs}))
-                result = await tools.run(name, cargs)
+                result = await _run_with_policy(
+                    store, session, tools, policy, approve, name, cargs)
                 store.append(Event(session_id=session.session_id, seq=0,
                                    type="tool_result",
                                    data={"name": name, "result": result}))
@@ -330,6 +334,45 @@ async def run_loop(
                              "answer": result.answer,
                              "stop_reason": stop_reason}))
     return result
+
+
+async def _run_with_policy(store: Any, session: Any, tools: Any,
+                             policy: Any | None, approve: Any | None,
+                             name: str, cargs: dict[str, Any]) -> Any:
+    """Execute one tool call through the policy layer.
+
+    - No policy (or allow): run directly.
+    - Deny: model-visible denial, no execution.
+    - Ask: approval_request event, resolver decides (default auto-approves
+      headless runs; the server passes a human gate), approval_decision event.
+    """
+    if policy is None:
+        return await tools.run(name, cargs)
+    decision = policy.evaluate(store.read(session.session_id),
+                               ProposedCall(tool=name, args=cargs or {}))
+    if decision.verdict == "deny":
+        store.append(Event(session_id=session.session_id, seq=0,
+                           type="policy_block",
+                           data={"name": name, "args": cargs,
+                                 "reason": decision.reason}))
+        return f"Denied by policy: {decision.reason}"
+    if decision.verdict == "ask":
+        store.append(Event(session_id=session.session_id, seq=0,
+                           type="approval_request",
+                           data={"name": name, "args": cargs,
+                                 "reason": decision.reason}))
+        if approve is None:
+            allowed, by = True, "auto"
+        else:
+            allowed = bool(await approve({"name": name, "args": cargs,
+                                          "reason": decision.reason}))
+            by = "human"
+        store.append(Event(session_id=session.session_id, seq=0,
+                           type="approval_decision",
+                           data={"name": name, "allow": allowed, "by": by}))
+        if not allowed:
+            return f"Denied by policy: {decision.reason}"
+    return await tools.run(name, cargs)
 
 
 async def _generate(

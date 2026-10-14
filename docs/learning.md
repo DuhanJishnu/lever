@@ -541,6 +541,7 @@
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 | 33 | B6 verify loop (visible tests) | `core/verify.py`, `core/loop.py` | First live mechanism proof; single-quote unescape |
 | 34 | B7 planner (registry + todo) | `prompts/v1+v2`, `prompts/registry.py`, `tools/todo.py` | Prompt as config diff; scratchpad survives compaction |
+| 35 | Policy engine (4 rules) | `policy/engine.py`, `policy/rules.py`, loop wiring | Code, not prompts; history-scanned state |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 
 ---
@@ -912,12 +913,41 @@ scratchpad + outcome unproven — needs Gemini or a stronger local model.
 
 ---
 
+## Phase 4: Policy engine (14 Oct 2026) — Step 35
+
+### Step 35 — Policies in code (`policy/engine.py`, `policy/rules.py`)
+
+1. **What:** `Rule` protocol (`evaluate(history, call) -> allow|deny|ask`),
+   `PolicyEngine` (first non-allow wins, deny-first ordering documented), 4
+   shipped rules: Confine (workspace escapes denied — defense in depth with
+   `resolve_safe`), BashAllowlist (listed binaries pass, rest ask, empty
+   denied), TokenBudget (cumulative model tokens from the event log itself),
+   InstallThenPush (history-scanned: push/network after pip-npm-uv install
+   asks). Loop: per-call gate via `_run_with_policy` — deny/denied-ask become
+   model-visible denial text (run continues); ask emits `approval_request`,
+   resolver decides (`None` = headless auto-approve, server will pass a human
+   gate), `approval_decision` logged. Opt-in (`policy=None` default) so the
+   B-ladder runs byte-identical with or without the layer. 8 tests (engine
+   order, all 4 rules incl. budget math from fabricated history, deny-blocks
+   write end-to-end, auto-approve logging, custom resolver denial).
+2. **Why:** Phase 4.1 spec verbatim, timed for the server/UI work next: the
+   approval modal needs exactly `approval_request` → human → `approval_decision`.
+   Stateful-via-history (not a side store) means replay shows WHY each decision
+   fired — no drift between state and log.
+3. **Theory:** Policies in code, not prompts: a prompt-instructed model can be
+   talked out of restraint; a code gate can't. The allowlist default-deny
+   posture (ask on unknown) is the safe direction — false asks cost a click,
+   false allows cost the workspace.
+
+---
+
 ## Next Phases (Not Yet Implemented — For Reference)
 
 - **Phase 3:** Ablation ladder B1–B8 — code + local-model ($0) measurement per rung;
   Gemini matrices only at the end (spend discipline). B1–B8 ALL built (B4–B8
   out of order, noted); B6 first live mechanism proof; B7 pilot pending.
-- **Phase 4:** Policy layer + Web UI (FastAPI + React, context inspector, eval dashboard)
+- **Phase 4:** Policy layer (engine done) + Web UI next (FastAPI + React,
+  context inspector, eval dashboard, approval modal on the new events)
 - **Phase 5:** Credibility run (held-out tasks, SWE-bench subset, results.md)
 - **Phase 6:** MCP client, event-stream adapter, upstream PR, README, video, blog, v1.0 release
 
