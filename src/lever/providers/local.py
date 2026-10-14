@@ -239,7 +239,16 @@ def _parse_fences(text: str, tools: list[dict[str, Any]]) -> list[ToolCall]:
     schemas = _tool_schemas(tools)
     calls: list[ToolCall] = []
     for body in re.findall(r"```tool_code\s*\n(.*?)```", text, re.DOTALL):
-        for line in body.strip().splitlines():
+        body = body.strip()
+        if not body:
+            continue
+        # Whole block first: calls whose arguments span lines (common for
+        # write_file/edit_file with embedded newlines).
+        name, args = _parse_call_line(body, index, schemas)
+        if name is not None and args is not None:
+            calls.append(ToolCall(name=name, args=args))
+            continue
+        for line in body.splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -292,13 +301,13 @@ def _parse_kwargs(raw: str, known: set[str]) -> dict[str, Any] | None:
     for sep in ("=", ":"):
         pairs = re.findall(
             r"([A-Za-z_][A-Za-z0-9_]*)\s*" + re.escape(sep) +
-            r"\s*(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|[^\s,]+)"
+            r"\s*(\"[^\"]*\"|'[^']*'|[^\s,]+)"
             r"\s*(?:,|$)", raw)
         if not pairs:
             continue
         check = re.sub(
             r"[A-Za-z_][A-Za-z0-9_]*\s*" + re.escape(sep) +
-            r"\s*(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|[^\s,]+)"
+            r"\s*(\"[^\"]*\"|'[^']*'|[^\s,]+)"
             r"\s*(?:,|$)", "", raw).strip()
         if check or any(k not in known for k, _ in pairs):
             continue

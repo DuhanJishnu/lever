@@ -533,6 +533,7 @@
 | 27 | B3 repo map (ast + PageRank) | `context/repomap.py`, `core/loop.py` (pin + refresh) | Structure-first orientation; pure function, cheap rebuilds |
 | 28 | Grep path fix + fence quotes | `tools/grep.py`, `providers/local.py` | Red traces find unit-test-blind bugs; cover observed shapes |
 | 29 | B8 loop guard (guards + tracker) | `core/guards.py`, `core/loop.py`, seed plumbing | Stop thrash early; seeds must be real replicates |
+| 30 | Fence multi-line + regex escaping | `providers/local.py` | Parse whole block first; test backslash inputs |
 
 ---
 
@@ -713,6 +714,23 @@
    red traces, accept exactly those. (Also recorded: b2's m02 win came via the
    ambiguity error suggesting `replace_all`, complied on the next turn — the
    B1 message design working as specified.)
+
+### Step 29d — Multi-line fences + the backslash-escaping postmortem
+
+1. **What:** b8's trace showed a `write_file` fence with embedded `\n`
+   escapes going unparsed (3-step stop). The fence parser split blocks into
+   lines first, so multi-line calls never matched — restructured to try the
+   whole block, then per-line fallback, with a regression test on the exact
+   live shape. While there: found my kwarg value-regex carried DOUBLED
+   backslashes (`\\\\` in file = match-two-literals), silently failing only on
+   backslash-containing values — which is why all simple tests passed and only
+   the live `\n` case failed. Replaced with quote-agnostic `[^"]*` classes.
+2. **Why:** Fourth observed fence shape; same rule (cover exactly what's
+   observed, strict otherwise). The escaping bug is the lesson: regexes with
+   backslash classes must be tested WITH backslash inputs — the passing suite
+   gave false confidence because no test contained one.
+3. **Theory:** Test the scary characters, not just the happy path. Any parser
+   touching model output needs a backslash/quote/unicode case on day one.
 
 ---
 

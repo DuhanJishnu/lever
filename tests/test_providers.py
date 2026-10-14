@@ -268,8 +268,12 @@ def _fence_tools():
                         "properties": {"cmd": {"type": "string"},
                                        "timeout": {"type": "integer"}},
                         "required": ["cmd"]}},
+        {"name": "write_file", "description": "w",
+         "parameters": {"type": "object",
+                        "properties": {"path": {"type": "string"},
+                                       "content": {"type": "string"}},
+                        "required": ["path", "content"]}},
     ]
-
 
 def test_parse_fences_single_positional():
     from lever.providers.local import _parse_fences
@@ -305,6 +309,11 @@ def test_parse_fences_strictness():
     assert [(c.name, c.args) for c in
             _parse_fences("```tool_code\nread_file(path='a.py')\n```", tools)] == [
         ("read_file", {"path": "a.py"})]
+    # multi-line arguments (write_file with embedded newlines, observed live)
+    assert [(c.name, c.args) for c in
+            _parse_fences("```tool_code\nwrite_file(path=\"a.py\", "
+                          "content=\"x = 1\\nprint(x)\")\n```", tools)] == [
+        ("write_file", {"path": "a.py", "content": "x = 1\nprint(x)"})]
     # garbage stays prose
     assert _parse_fences('```tool_code\nread_file((()))\n```', tools) == []
     # no fence -> no calls (never hallucinate from prose)
