@@ -11,7 +11,17 @@ from typing import Any, Literal
 
 from .config import HarnessConfig
 from .events import Event
-from .guards import LoopState, compose_guards, max_steps_guard
+from .guards import (
+    LoopState,
+    RepeatTracker,
+    call_key,
+    compose_guards,
+    is_failure,
+    max_context_messages,
+    max_steps_guard,
+    max_tokens_guard,
+    time_limit_guard,
+)
 from .session import Session
 
 SYSTEM_B0 = (
@@ -75,6 +85,7 @@ class LoopResult:
     trace: list[LoopIteration] = field(default_factory=list)
     stopped_by: StoppedBy = "model"
     session_id: str = ""
+    stop_reason: str = ""  # which guard fired / why (B8 analysis)
 
 
 async def run_loop(
@@ -86,13 +97,27 @@ async def run_loop(
     store: Any,  # EventStore (Any to keep core import-light)
     cache: Any | None = None,  # ResponseCache — skips repeat API calls
     tools: Any | None = None,  # ToolRegistry — created from session if omitted
+    seed: int = 0,  # sampling seed: isolates cache entries per replicate
 ) -> LoopResult:
+    import time as _time
+
     from ..tools.registry import create_tools  # local import: tools depend on core, not vice versa
 
     workspace = session.workspace or session.open()
     if tools is None:
         tools = create_tools(workspace, config)
-    guards = compose_guards(max_steps_guard)  # B0: max_steps only; B8 extends this list
+    want_guard = bool(getattr(config, "loop_guard", False))
+    if want_guard:
+        guards = compose_guards(
+            max_steps_guard,
+            max_context_messages(),
+            max_tokens_guard(config.context_budget_tokens),
+            time_limit_guard(),
+        )
+        tracker = RepeatTracker()
+    else:
+        guards = compose_guards(max_steps_guard)  # B0: max_steps only
+        tracker = None
 
     store.append(Event(session_id=session.session_id, seq=0,
                        type="user_message", data={"content": task}))
@@ -106,8 +131,11 @@ async def run_loop(
                                    + build_repomap(workspace, task))
     trace: list[LoopIteration] = []
     stopped_by: StoppedBy = "model"
+    stop_reason = ""
     answer = ""
     empty_retries = 0
+    history: list[str] = []
+    t0 = _time.monotonic()
 
     try:
         for _ in range(config.max_steps):
@@ -116,9 +144,12 @@ async def run_loop(
                 max_steps=config.max_steps,
                 context_messages=len(messages),
                 est_tokens=estimate_tokens(messages),
+                elapsed_s=_time.monotonic() - t0,
+                history=tuple(history),
             )
             guard = guards(state)
             if guard.verdict == "stop":
+                stop_reason = guard.reason
                 stopped_by = "guardrail" if "max_steps" not in guard.reason else "max_steps"
                 break
 
@@ -127,7 +158,7 @@ async def run_loop(
             store.append(Event(session_id=session.session_id, seq=0,
                                type="model_request",
                                data={"messages": messages, "model": model_name}))
-            resp = await _generate(provider, messages, tools.definitions, config, cache)
+            resp = await _generate(provider, messages, tools.definitions, config, cache, seed)
             store.append(Event(session_id=session.session_id, seq=0,
                                type="model_response", data=resp.model_dump()
                                if hasattr(resp, "model_dump") else dict(resp)))
@@ -183,6 +214,31 @@ async def run_loop(
                                    data={"name": name, "result": result}))
                 messages.append({"role": "tool", "name": name, "content": result})
                 events.append(ToolEvent(tool=name, args=cargs, result=result))
+            if want_guard and tracker is not None:
+                keys = [call_key(e.tool, e.args) for e in events]
+                history.extend(keys)
+                all_failed = bool(events) and all(
+                    is_failure(e.result) for e in events)
+                action, intervention = tracker.update(keys, all_failed)
+                if action in ("nudge", "replan"):
+                    store.append(Event(
+                        session_id=session.session_id, seq=0,
+                        type="harness_nudge",
+                        data={"kind": action, "text": intervention,
+                              "triggers": tracker.triggers}))
+                    messages.append({"role": "user", "content": intervention})
+                elif action == "stop":
+                    stop_reason = intervention
+                    stopped_by = "guardrail"
+                    store.append(Event(
+                        session_id=session.session_id, seq=0,
+                        type="harness_nudge",
+                        data={"kind": "stop", "text": intervention,
+                              "triggers": tracker.triggers}))
+                    trace.append(LoopIteration(
+                        index=len(trace) + 1, outcome="tool_calls",
+                        tool_events=events, context_size=ctx_size))
+                    break
             if want_map and _mutated(events):
                 # A file changed: refresh the pinned map so later turns see
                 # new/moved definitions. Cheap on small repos; rebuilds only.
@@ -203,23 +259,25 @@ async def run_loop(
 
     result = LoopResult(answer=answer or "(stopped)",
                         iterations=len(trace), trace=trace,
-                        stopped_by=stopped_by, session_id=session.session_id)
+                        stopped_by=stopped_by, session_id=session.session_id,
+                        stop_reason=stop_reason)
     store.append(Event(session_id=session.session_id, seq=0, type="session_end",
                        data={"stopped_by": stopped_by, "iterations": len(trace),
-                             "answer": result.answer}))
+                             "answer": result.answer,
+                             "stop_reason": stop_reason}))
     return result
 
 
 async def _generate(
     provider: Any, messages: list[dict[str, Any]], definitions: list[dict[str, Any]],
-    config: HarnessConfig, cache: Any | None,
+    config: HarnessConfig, cache: Any | None, seed: int = 0,
 ) -> Any:
     if cache is None:
         return await provider.generate(messages, definitions, config)
     from ..providers.cache import cache_key
 
     key = cache_key(str(getattr(provider, "model", "fake")),
-                    messages, definitions, config)
+                    messages, definitions, config, seed)
     hit = cache.get(key)
     if hit is not None:
         from ..providers.base import ModelResponse

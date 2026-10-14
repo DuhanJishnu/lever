@@ -12,7 +12,8 @@ from typing import Any
 
 
 def cache_key(
-    model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]], config: Any
+    model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]],
+    config: Any, seed: int = 0,
 ) -> str:
     cfg: dict[str, Any] = {}
     if config is not None:
@@ -21,7 +22,8 @@ def cache_key(
         except Exception:
             cfg = {"repr": repr(config)}
     payload = json.dumps(
-        {"model": model, "messages": messages, "tools": tools, "config": cfg},
+        {"model": model, "messages": messages, "tools": tools,
+         "config": cfg, "seed": seed},
         sort_keys=True,
         default=str,
     )

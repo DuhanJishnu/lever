@@ -84,6 +84,7 @@ class GeminiProvider:
         tool_config = self._to_tools(tools)
         temperature = float(getattr(config, "temperature", 0.2) or 0.2)
         system_text = _extract_system(messages)
+        seed = getattr(config, "seed", None)
 
         # google-genai SDK is sync; run in thread to avoid blocking the loop.
         import asyncio
@@ -97,6 +98,8 @@ class GeminiProvider:
             cfg: dict[str, Any] = {"temperature": temperature}
             if system_text:
                 cfg["system_instruction"] = system_text
+            if isinstance(seed, int):
+                cfg["seed"] = seed
             kwargs["config"] = cfg
             if tool_config:
                 tools_cfg = kwargs["config"]

@@ -131,6 +131,7 @@ async def run_one(task: dict, config: dict, config_name: str, seed: int,
     from lever.store.sqlite import EventStore
 
     cfg = HarnessConfig(**config)
+    cfg.seed = seed
     t0 = time.time()
     run_dir = work_root / f"{task['id']}_{config_name}_s{seed}"
     prepare_workspace(task, run_dir)
@@ -158,7 +159,8 @@ async def run_one(task: dict, config: dict, config_name: str, seed: int,
     task_text = (Path(task["_dir"]) / "task.md").read_text(encoding="utf-8")
     result = await run_loop(provider=provider, session=session, task=task_text,
                             config=cfg, store=store,
-                            cache=ResponseCache(work_root / "cache.jsonl"))
+                            cache=ResponseCache(work_root / "cache.jsonl"),
+                            seed=seed)
     events = store.read(session.session_id)
     store.close()
 
@@ -176,7 +178,10 @@ async def run_one(task: dict, config: dict, config_name: str, seed: int,
         "config": config_name, "seed": seed, "provider": provider_name,
         "backend": backend, "dry_run": dry_run,
         "pass": passed, "grade_tail": grade_tail,
-        "stopped_by": result.stopped_by, "steps": result.iterations,
+        "stopped_by": result.stopped_by, "stop_reason": result.stop_reason,
+        "nudges": sum(1 for e in events if e.type == "harness_nudge"
+                      and e.data.get("kind") in ("nudge", "replan")),
+        "steps": result.iterations,
         "tokens_in": sum(e.data.get("input_tokens", 0) for e in events
                          if e.type == "model_response"),
         "tokens_out": sum(e.data.get("output_tokens", 0) for e in events
@@ -283,7 +288,8 @@ async def _main_async(args: argparse.Namespace, configs: dict) -> None:
                     "config": cname, "seed": seed, "provider": "error",
                     "backend": backend, "dry_run": args.dry_run,
                     "pass": False, "error": f"{type(e).__name__}: {str(e)[:500]}",
-                    "stopped_by": "error", "steps": 0, "tokens_in": 0,
+                    "stopped_by": "error", "stop_reason": "", "nudges": 0,
+                    "steps": 0, "tokens_in": 0,
                     "tokens_out": 0, "tool_errors": 0, "edit_failures": 0,
                     "compactions": 0, "context_sizes": [], "fell_for_trap": None,
                     "diff_stat": "", "session_id": "", "wall_s": 0.0,

@@ -388,6 +388,7 @@
 | 26 | `tools/base.py` (head/tail), `tools/fs.py` (ranged read), `tools/registry.py` (flag), `evals/configs.json` (b2) | 3 |
 | 27 | `context/repomap.py` (new pkg), `core/loop.py` (pin + refresh), `evals/configs.json` (b3), `tests/test_repomap.py` | 3 |
 | 28 | `tools/grep.py` (resolve fix), `providers/local.py` (quote shapes), `tests/test_tools.py` + `test_providers.py` | 3–local |
+| 29 | `core/guards.py` (tracker+factories), `core/loop.py` (wire), `core/events.py` (nudge event), `core/config.py` + providers + runner (seed), `tests/test_guards.py` | 8 |
 
 ---
 
@@ -531,6 +532,7 @@
 | 26 | B2 truncation + ranged reads | `tools/base.py`, `tools/fs.py`, `tools/registry.py` | Bounded context per call; second keep-on-mechanism rung |
 | 27 | B3 repo map (ast + PageRank) | `context/repomap.py`, `core/loop.py` (pin + refresh) | Structure-first orientation; pure function, cheap rebuilds |
 | 28 | Grep path fix + fence quotes | `tools/grep.py`, `providers/local.py` | Red traces find unit-test-blind bugs; cover observed shapes |
+| 29 | B8 loop guard (guards + tracker) | `core/guards.py`, `core/loop.py`, seed plumbing | Stop thrash early; seeds must be real replicates |
 
 ---
 
@@ -711,6 +713,52 @@
    red traces, accept exactly those. (Also recorded: b2's m02 win came via the
    ambiguity error suggesting `replace_all`, complied on the next turn — the
    B1 message design working as specified.)
+
+---
+
+## Phase 3: B8 loop guard (14 Oct 2026) — Step 29
+
+### Step 29a — Implementation (`core/guards.py`, `loop.py`, seed plumbing)
+
+1. **What:** Two layers behind `loop_guard` (B0–B3 byte-identical when off,
+   asserted by `test_loop_guard_off_by_default`). HARD: composable factories
+   `max_context_messages(300)`, `max_tokens_guard(context_budget)`,
+   `time_limit_guard(600s)` + existing `max_steps`, first-stop-wins with the
+   reason recorded (`LoopResult.stop_reason`, `session_end.stop_reason`,
+   runner `stop_reason` + `nudges` columns). SOFT: `RepeatTracker` — call keys
+   (`tool:sorted-json-args`) over a 5-turn window; same set 3× or back-to-back
+   all-failed turns trigger nudge → nudge → forced re-plan → stop, delivered
+   as harness user messages + `harness_nudge` events (new event type). Failure
+   markers conservative (`REVERTED`, `not found`, `timed out`… — never
+   `No matches`). 11 tests (guard factories, key stability, tracker
+   escalation/pairs/varied-clean, off-by-default, live stop with 2+replan+stop
+   events, nudge visible in history).
+2. **Why:** Two observed 40-step thrashes (223s, 368s, 51k+ tokens) with zero
+   progress — tolerance without a guard multiplies failure. The failure-pair
+   detector exists because b02 alternated two doomed calls, defeating
+   consecutive-identical checks.
+3. **Theory:** Structure (hard stops) vs coaching (nudges): the former bounds
+   worst-case cost unconditionally, the latter spends a little context to
+   rescue borderline runs. Trip points are constants, not configs — the ladder
+   varies features, and a moving tripwire would confound every comparison.
+
+### Step 29b — Seed-aliasing methodology bug (found live, fixed)
+
+1. **What:** The b8 pilot's seed-1 rows finished in ~1s with identical steps —
+   the response cache keyed (model, messages, tools, config) but NOT seed, so
+   seeds 1–2 replayed seed 0 byte-for-byte. Every prior "3-seed" matrix
+   (including the 78 Gemini rows) measured 1 seed thrice — CIs overstated.
+   Fix: `cache_key(..., seed)`, `run_loop(..., seed)`, runner sets
+   `HarnessConfig.seed` per replicate; seed forwarded to Gemini
+   (`GenerateContentConfig.seed`, verified field) and llama-server
+   (`body.seed`) for genuine sampling variation. Regression tests (key
+   isolation, no cross-seed cache reuse). Old cache entries simply miss.
+2. **Why:** Replicates must replicate the *experiment*, not replay one
+   recording. Honest uncertainty bars are load-bearing for the headline claim.
+3. **Theory:** Cache identity must equal experimental identity. Anything that
+   varies the trial (seed) belongs in the key — this is the same class of bug
+   as the silently-truncating patches: green gates, wrong science. The Gemini
+   ladder will be re-run with real seeds; past CIs should be read as n=1.
 
 ---
 

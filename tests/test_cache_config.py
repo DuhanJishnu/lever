@@ -1,5 +1,7 @@
 import sys
 
+import pytest
+
 sys.path.insert(0, "src")
 
 from lever.core.config import HarnessConfig
@@ -35,3 +37,35 @@ def test_b0_all_toggles_off():
         ]
     )
     assert cfg.best_of_n == 1
+
+
+def test_cache_key_isolates_seeds():
+    """Regression: identical runs under different seeds aliased to one cache
+    entry, so '3 seeds' were really 1 seed replayed twice."""
+    cfg = HarnessConfig()
+    msgs = [{"role": "user", "content": "say hi"}]
+    assert cache_key("m", msgs, [], cfg, 0) != cache_key("m", msgs, [], cfg, 1)
+    assert cache_key("m", msgs, [], cfg, 0) == cache_key("m", msgs, [], cfg, 0)
+
+
+@pytest.mark.asyncio
+async def test_loop_seeds_do_not_share_cache(tmp_path):
+    from lever.core.loop import run_loop
+    from lever.core.session import Session
+    from lever.providers.base import ModelResponse
+    from lever.providers.cache import ResponseCache
+    from lever.providers.fake import FakeProvider
+    from lever.store.sqlite import EventStore
+
+    prov = FakeProvider([ModelResponse(text="a"), ModelResponse(text="b")])
+    cache = ResponseCache(tmp_path / "c.jsonl")
+    for seed in (0, 1):
+        store = EventStore(tmp_path / f"e{seed}.db")
+        session = Session(source=tmp_path)
+        session.open(base_dir=tmp_path / f"ws{seed}")
+        await run_loop(provider=prov, session=session, task="t",
+                       config=HarnessConfig.b0(), store=store,
+                       cache=cache, seed=seed)
+        store.close()
+    assert len(prov.calls) == 2  # no cross-seed cache hit
+    assert cache.misses == 2

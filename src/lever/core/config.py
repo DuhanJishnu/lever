@@ -8,6 +8,7 @@ from pydantic import BaseModel
 class HarnessConfig(BaseModel):
     temperature: float = 0.2
     thinking_budget: int | None = None  # keep IDENTICAL across ablations
+    seed: int | None = None  # sampling seed; set per-run by the runner, never in configs
     max_steps: int = 40
     context_budget_tokens: int = 60_000
 

@@ -21,6 +21,7 @@ EventType = Literal[
     "checkpoint",
     "error",
     "session_end",
+    "harness_nudge",
 ]
 
 

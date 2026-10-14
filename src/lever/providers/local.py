@@ -52,6 +52,9 @@ class LocalProvider:
             "messages": _to_openai(_with_tool_doc(messages, tools)),
             "temperature": float(getattr(config, "temperature", 0.2) or 0.2),
         }
+        seed = getattr(config, "seed", None)
+        if isinstance(seed, int) and seed >= 0:
+            body["seed"] = seed
         # NOTE: no `tools` array is sent. llama.cpp's Gemma template cannot
         # build its tool-call parser for our histories (intermittent 400s:
         # "Conversation roles must alternate..."), and small models ignore
