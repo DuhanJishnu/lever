@@ -391,6 +391,7 @@
 | 29 | `core/guards.py` (tracker+factories), `core/loop.py` (wire), `core/events.py` (nudge event), `core/config.py` + providers + runner (seed), `tests/test_guards.py` | 8 |
 | 30 | `context/masking.py` (new), `core/loop.py` (send path), `tests/test_repomap.py` + `test_loop.py`, `evals/configs.json` (b4) | 4 |
 | 31 | `context/compaction.py` (new), `core/loop.py` (tripwire+event), `tests/test_compaction.py`, `evals/configs.json` (b5) | 5 |
+| 32 | `server/app.py` + `sessions.py` (new pkg), `cli.py` (serve), `tests/test_server.py` | 4.2 |
 | 32 | `prompts/v1+v2` (new pkg), `prompts/registry.py`, `tools/todo.py`, `core/loop.py` (render), `tests/test_planner.py`, `evals/configs.json` (b7) | 7 |
 
 ---
@@ -542,6 +543,7 @@
 | 33 | B6 verify loop (visible tests) | `core/verify.py`, `core/loop.py` | First live mechanism proof; single-quote unescape |
 | 34 | B7 planner (registry + todo) | `prompts/v1+v2`, `prompts/registry.py`, `tools/todo.py` | Prompt as config diff; scratchpad survives compaction |
 | 35 | Policy engine (4 rules) | `policy/engine.py`, `policy/rules.py`, loop wiring | Code, not prompts; history-scanned state |
+| 36 | Server (REST+SSE, approvals) | `server/app.py`, `sessions.py`, CLI serve | Futures for approvals; ASGI tests, not TestClient |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 
 ---
@@ -941,13 +943,38 @@ scratchpad + outcome unproven — needs Gemini or a stronger local model.
 
 ---
 
+## Phase 4: Server REST + SSE (14 Oct 2026) — Step 36
+
+### Step 36 — Sessions, streams, human approvals (`server/`)
+
+1. **What:** `sessions.py` (registry: workspaces, configs, run tasks, pending
+   approval futures), `app.py` (create/list/get, messages-starts-run,
+   events+since_seq, diff, approvals resolve, fork-prefix-copy, SSE stream to
+   `session_end`, CORS, `lever serve` via uvicorn). Approvals: loop-generated
+   `req_id` → server future (10-min timeout → deny) → endpoint resolves.
+   Provider seam (`create_app(providers=...)`) for scripted tests. 5 tests:
+   lifecycle+replay+stream, idle-start, full human approval e2e (deny →
+   denial result), fork prefix, 404s.
+2. **Why:** The web UI needs exactly this surface; the acceptance demo
+   (start → watch → approve → diff) is now API-possible. Single-task sessions
+   match the loop — fork copies history for retry, not mid-run resume (stated).
+3. **Theory:** Two load-bearing fixes: (a) EventStore is now lock-guarded with
+   `check_same_thread=False` — endpoints, run tasks, and streams share one
+   connection (the old one crashed under any concurrency); (b) the API session
+   id and workspace session id diverged (two ids, lost log) — forced equal on
+   open. Plus a test-harness lesson: starlette TestClient cancels
+   fire-and-forget background waits, so server tests use ASGI transport in the
+   test loop — the design was right, the legacy client lied.
+
+---
+
 ## Next Phases (Not Yet Implemented — For Reference)
 
 - **Phase 3:** Ablation ladder B1–B8 — code + local-model ($0) measurement per rung;
   Gemini matrices only at the end (spend discipline). B1–B8 ALL built (B4–B8
   out of order, noted); B6 first live mechanism proof; B7 pilot pending.
-- **Phase 4:** Policy layer (engine done) + Web UI next (FastAPI + React,
-  context inspector, eval dashboard, approval modal on the new events)
+- **Phase 4:** Policy layer + server done; web UI next (React: run view,
+  context inspector, sessions replay, eval dashboard, approval modal)
 - **Phase 5:** Credibility run (held-out tasks, SWE-bench subset, results.md)
 - **Phase 6:** MCP client, event-stream adapter, upstream PR, README, video, blog, v1.0 release
 

@@ -110,5 +110,19 @@ def run(
     store.close()
 
 
+@app.command("serve")
+def serve(
+    port: int = typer.Option(8000, help="Port to listen on."),
+    db: str = typer.Option(".lever_sessions.db", help="Sessions event-store path."),
+) -> None:
+    """Start the Lever HTTP server (REST + SSE) for the web UI."""
+    load_dotenv()
+    import uvicorn
+
+    from lever.server.app import create_app
+
+    uvicorn.run(create_app(db), host="127.0.0.1", port=port, log_level="info")
+
+
 if __name__ == "__main__":
     sys.exit(app())

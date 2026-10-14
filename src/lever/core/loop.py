@@ -357,19 +357,24 @@ async def _run_with_policy(store: Any, session: Any, tools: Any,
                                  "reason": decision.reason}))
         return f"Denied by policy: {decision.reason}"
     if decision.verdict == "ask":
+        import uuid
+
+        req_id = uuid.uuid4().hex[:12]
         store.append(Event(session_id=session.session_id, seq=0,
                            type="approval_request",
-                           data={"name": name, "args": cargs,
+                           data={"req_id": req_id, "name": name, "args": cargs,
                                  "reason": decision.reason}))
         if approve is None:
             allowed, by = True, "auto"
         else:
-            allowed = bool(await approve({"name": name, "args": cargs,
+            allowed = bool(await approve({"req_id": req_id, "name": name,
+                                          "args": cargs,
                                           "reason": decision.reason}))
             by = "human"
         store.append(Event(session_id=session.session_id, seq=0,
                            type="approval_decision",
-                           data={"name": name, "allow": allowed, "by": by}))
+                           data={"req_id": req_id, "name": name,
+                                 "allow": allowed, "by": by}))
         if not allowed:
             return f"Denied by policy: {decision.reason}"
     return await tools.run(name, cargs)

@@ -13,6 +13,7 @@ lever_cache/
 .lever_events.db
 .lever_events.db-*
 .lever_events-live*.db*
+.lever_sessions.db*
 .lever_workspaces/
 
 /harness_engineering_distilled

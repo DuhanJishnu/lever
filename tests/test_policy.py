@@ -120,6 +120,8 @@ async def test_loop_ask_auto_approves_and_logs(tmp_path):
     decisions = [e for e in evs if e.type == "approval_decision"]
     assert len(decisions) == 1 and decisions[0].data["allow"] is True
     assert decisions[0].data["by"] == "auto"
+    assert decisions[0].data["req_id"] == next(
+        e for e in evs if e.type == "approval_request").data["req_id"]
     store.close()
 
 
@@ -144,6 +146,9 @@ async def test_loop_ask_custom_resolver_can_deny(tmp_path):
                             cache=None, policy=engine, approve=nope)
     decisions = [e for e in store.read(session.session_id)
                  if e.type == "approval_decision"]
-    assert decisions[0].data == {"name": "bash", "allow": False, "by": "human"}
+    assert decisions[0].data["name"] == "bash"
+    assert decisions[0].data["allow"] is False
+    assert decisions[0].data["by"] == "human"
+    assert decisions[0].data["req_id"]
     assert result.answer == "done"
     store.close()
