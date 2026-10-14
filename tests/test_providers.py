@@ -309,6 +309,16 @@ def test_parse_fences_strictness():
     assert [(c.name, c.args) for c in
             _parse_fences("```tool_code\nread_file(path='a.py')\n```", tools)] == [
         ("read_file", {"path": "a.py"})]
+    # single-quoted escapes match double-quoted (JSON) semantics
+    assert [(c.name, c.args) for c in
+            _parse_fences("```tool_code\nwrite_file(path='a.py', "
+                          "content='x = 1\\nprint(x)')\n```", tools)] == [
+        ("write_file", {"path": "a.py", "content": "x = 1\nprint(x)"})]
+    # unknown escapes stay literal (Windows paths)
+    assert [(c.name, c.args) for c in
+            _parse_fences("```tool_code\nread_file(path='C:\\q\\a.py')\n```",
+                          tools)] == [
+        ("read_file", {"path": "C:\\q\\a.py"})]
     # multi-line arguments (write_file with embedded newlines, observed live)
     assert [(c.name, c.args) for c in
             _parse_fences("```tool_code\nwrite_file(path=\"a.py\", "

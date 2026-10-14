@@ -538,6 +538,7 @@
 | 30 | Fence multi-line + regex escaping | `providers/local.py` | Parse whole block first; test backslash inputs |
 | 31 | B4 masking (keep-6 + placeholder) | `context/masking.py`, `core/loop.py` | No-op when short; integration test proves channel |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
+| 33 | B6 verify loop (visible tests) | `core/verify.py`, `core/loop.py` | First live mechanism proof; single-quote unescape |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 
 ---
@@ -847,11 +848,40 @@ b8-seeds-5–9 hunt runs in background; a caught thrash-cut closes the proof.
 
 ---
 
+## Phase 3: B6 verify loop (14 Oct 2026) — Step 33
+
+### Step 33 — Verify (`core/verify.py`, loop claim-check)
+
+1. **What:** `detect_test_cmd()` (pytest if tests exist, else compileall, else
+   None), `run_tests()` (async subprocess, 120s, clears `__pycache__` first —
+   same-second rewrites read stale bytecode otherwise), `trim_report()`
+   (first failure + last 40 lines), `trace_ran_tests()` + `mentioned_files()`
+   semantic checks. Loop: on "done" with the flag, run up to 3 rounds;
+   failure appends `[verify]` feedback and continues; exhaustion tags the
+   answer `[unverified...]`; verify runs logged as `verify_tests`
+   tool_call/tool_result (audit-visible, metric-safe). `b6` = b5 + flag.
+   6 tests (detect, pass/fail incl. cache-clearing, trace/mention helpers,
+   accept-on-pass, reject-then-fix with feedback asserted in history).
+2. **Why:** Watched B0 stop at turn 4 on an unchanged file claiming success —
+   the exact hallucination B6 exists to catch. Visible-tests-only (hidden
+   grading tests never leak into the run).
+3. **Theory:** Trust-but-verify at the loop level: the claim channel (model
+   prose) and the verification channel (harness-executed tests) must be
+   independent, or "done" is just self-attestation. Trace hooks (did IT run
+   tests?) over prose ("tests pass") — same principle as Step 18's hooks.
+
+### Step 33b — B6 live: 19-step recovery run + literal-\\n pathology
+
+(Recorded in `docs/ablations.md`: false done caught, 15 genuine recovery
+turns, single-quote unescape fix. First rung with live mechanism proof.)
+
+---
+
 ## Next Phases (Not Yet Implemented — For Reference)
 
 - **Phase 3:** Ablation ladder B1–B8 — code + local-model ($0) measurement per rung;
-  Gemini matrices only at the end (spend discipline). B1+B2 built, both
-  keep-on-mechanism; B8 loop guard motivated by observed thrash.
+  Gemini matrices only at the end (spend discipline). B1–B6 + B8 built; B6 first
+  live mechanism proof; B7 planner remaining.
 - **Phase 4:** Policy layer + Web UI (FastAPI + React, context inspector, eval dashboard)
 - **Phase 5:** Credibility run (held-out tasks, SWE-bench subset, results.md)
 - **Phase 6:** MCP client, event-stream adapter, upstream PR, README, video, blog, v1.0 release

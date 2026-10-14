@@ -23,6 +23,7 @@ from .guards import (
     time_limit_guard,
 )
 from .session import Session
+from .verify import VERIFY_MAX_ROUNDS, verify_completion
 
 SYSTEM_B0 = (
     "You are a coding agent in a workspace. Use the available tools "
@@ -125,6 +126,8 @@ async def run_loop(
     want_map = bool(getattr(config, "repo_map", False))
     want_mask = bool(getattr(config, "observation_masking", False))
     want_compact = bool(getattr(config, "compaction", False))
+    want_verify = bool(getattr(config, "verify_loop", False))
+    verify_rounds = 0
     touched: set[str] = set()
     if want_map:
         from ..context.repomap import build_repomap
@@ -199,6 +202,41 @@ async def run_loop(
 
             if not tool_calls:
                 answer = text or "(no response)"
+                if want_verify and verify_rounds < VERIFY_MAX_ROUNDS:
+                    # Model claims done: check it against visible tests before
+                    # believing it. Failure -> trimmed report, model continues.
+                    verify_rounds += 1
+                    vr = await verify_completion(workspace, answer, trace)
+                    store.append(Event(
+                        session_id=session.session_id, seq=0, type="tool_call",
+                        data={"name": "verify_tests",
+                              "args": {"cmd": vr.command}}))
+                    store.append(Event(
+                        session_id=session.session_id, seq=0, type="tool_result",
+                        data={"name": "verify_tests",
+                              "result": ("verify: PASS. " if vr.passed else
+                                         "verify: FAIL. ") + vr.report[:2000]}))
+                    if vr.passed:
+                        messages.append({"role": "assistant", "content": answer})
+                        trace.append(LoopIteration(
+                            index=len(trace) + 1, outcome="answer",
+                            context_size=ctx_size))
+                        stopped_by = "model"
+                        break
+                    if verify_rounds >= VERIFY_MAX_ROUNDS:
+                        answer = answer + " [unverified: tests still failing]"
+                        messages.append({"role": "assistant", "content": answer})
+                        trace.append(LoopIteration(
+                            index=len(trace) + 1, outcome="answer",
+                            context_size=ctx_size))
+                        stopped_by = "model"
+                        break
+                    messages.append({"role": "assistant", "content": answer})
+                    messages.append({"role": "user", "content":
+                        "[verify] Your 'done' does not hold:\n" + vr.report[:2000] +
+                        "\nKeep working. Run the tests yourself when you think "
+                        "it is fixed."})
+                    continue
                 messages.append({"role": "assistant", "content": answer})
                 trace.append(LoopIteration(index=len(trace) + 1,
                                            outcome="answer", context_size=ctx_size))

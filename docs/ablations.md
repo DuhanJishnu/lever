@@ -132,3 +132,22 @@ small-model variance cuts both ways.
 **Decision: KEEP on mechanism, UNMEASURED live.** The honest B5 test is a
 100k+ history (per the plan's own acceptance); none of our tasks produce
 one. On real long runs the tripwire + event + UI meter path is fully wired.
+
+## B6 local pilot (14 Oct 2026) -- b01/b02 x all 7 configs: mechanism PROVEN live
+
+b01-b6 ran 19 steps (vs 2-4 elsewhere): model claimed done on an UNCHANGED
+file -> verify_tests ran pytest -> FAILED (exit 2, SyntaxError) -> trimmed
+report fed back -> 15 more turns of genuine varied recovery (syntax-gate
+reverts, miss reports, rewrites). Without verify it would have stopped at
+turn 4 with a lie. Outcome still fail (4B too weak + literal-\n pathology
+below), but this is the first rung whose MECHANISM is demonstrated live,
+not just scripted.
+
+Failure taxonomy addition: the model writes literal backslash-n instead of
+newlines inside single-quoted fence args, producing one-line files that trip
+the syntax gate forever. Fix: single-quoted values now unescape with JSON
+semantics (unknown escapes stay literal for paths). Fourth fence shape
+covered by the same collect-from-traces rule.
+
+**Decision: KEEP, mechanism proven live.** B6 is the first rung that changes
+run SHAPE observably (19 steps vs 4) rather than just passing/failing.

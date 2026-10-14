@@ -319,7 +319,7 @@ def _parse_kwargs(raw: str, known: set[str]) -> dict[str, Any] | None:
                 except (json.JSONDecodeError, ValueError):
                     break
             elif v.startswith("'"):
-                args[k] = v[1:-1].replace("\\'", "'").replace("\\\\", "\\")
+                args[k] = _unescape(v[1:-1])
             else:
                 try:
                     args[k] = int(v)
@@ -328,6 +328,25 @@ def _parse_kwargs(raw: str, known: set[str]) -> dict[str, Any] | None:
         else:
             return args
     return None
+
+
+_SIMPLE_ESCAPES = {
+    "n": "\n", "t": "\t", "r": "\r", "\\": "\\",
+    "'": "'", '"': '"', "0": "\0",
+}
+
+
+def _unescape(s: str) -> str:
+    """Decode standard escapes in single-quoted fence values — same semantics
+    as the double-quoted (JSON) form, so both quote styles behave identically.
+    Unknown escapes stay literal (safe for paths like C:\\q)."""
+    import re
+
+    return re.sub(
+        r"\\(.)",
+        lambda m: _SIMPLE_ESCAPES.get(m.group(1), m.group(0)),
+        s,
+    )
 
 
 def _single_arg(first: str | None, raw: str) -> dict[str, Any] | None:
