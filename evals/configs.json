@@ -126,5 +126,21 @@
     "loop_guard": false,
     "best_of_n": 1,
     "prompt_version": "v1"
+  },
+  "b7": {
+    "temperature": 0.2,
+    "thinking_budget": null,
+    "max_steps": 40,
+    "context_budget_tokens": 60000,
+    "tolerant_edit": true,
+    "repo_map": true,
+    "output_truncation": true,
+    "observation_masking": true,
+    "compaction": true,
+    "verify_loop": true,
+    "planner_prompt": true,
+    "loop_guard": false,
+    "best_of_n": 1,
+    "prompt_version": "v2"
   }
 }

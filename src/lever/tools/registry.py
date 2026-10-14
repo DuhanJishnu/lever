@@ -15,6 +15,7 @@ from .bash import make_bash_tool
 from .edit import make_edit_tool
 from .fs import make_read_tool, make_write_tool
 from .grep import make_grep_tool
+from .todo import make_todo_tool
 
 
 def create_tools(workspace: Path | str, config: Any | None = None) -> ToolRegistry:
@@ -28,4 +29,6 @@ def create_tools(workspace: Path | str, config: Any | None = None) -> ToolRegist
         make_grep_tool(root),
         make_bash_tool(root),
     ]
+    if bool(getattr(config, "planner_prompt", False)):
+        tools.append(make_todo_tool())  # scratchpad only with the planner prompt
     return ToolRegistry(by_name={t.name: t for t in tools}, truncate=trunc)

@@ -391,6 +391,7 @@
 | 29 | `core/guards.py` (tracker+factories), `core/loop.py` (wire), `core/events.py` (nudge event), `core/config.py` + providers + runner (seed), `tests/test_guards.py` | 8 |
 | 30 | `context/masking.py` (new), `core/loop.py` (send path), `tests/test_repomap.py` + `test_loop.py`, `evals/configs.json` (b4) | 4 |
 | 31 | `context/compaction.py` (new), `core/loop.py` (tripwire+event), `tests/test_compaction.py`, `evals/configs.json` (b5) | 5 |
+| 32 | `prompts/v1+v2` (new pkg), `prompts/registry.py`, `tools/todo.py`, `core/loop.py` (render), `tests/test_planner.py`, `evals/configs.json` (b7) | 7 |
 
 ---
 
@@ -539,6 +540,7 @@
 | 31 | B4 masking (keep-6 + placeholder) | `context/masking.py`, `core/loop.py` | No-op when short; integration test proves channel |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 | 33 | B6 verify loop (visible tests) | `core/verify.py`, `core/loop.py` | First live mechanism proof; single-quote unescape |
+| 34 | B7 planner (registry + todo) | `prompts/v1+v2`, `prompts/registry.py`, `tools/todo.py` | Prompt as config diff; scratchpad survives compaction |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 
 ---
@@ -877,11 +879,37 @@ turns, single-quote unescape fix. First rung with live mechanism proof.)
 
 ---
 
+## Phase 3: B7 planner prompt + scratchpad (14 Oct 2026) — Step 34
+
+### Step 34a — Implementation (prompts registry, todo tool)
+
+1. **What:** `prompts/v1/*.md` (naive baseline shape) + `prompts/v2/*.md`
+   (planner workflow, scratchpad rules, tolerant-edit rules, verify-doneness,
+   2 few-shot transcripts); `prompts/registry.py` renders sections with a
+   `{tools}` placeholder (prompt↔tool-surface consistent by construction,
+   unknown version falls back to v1). `tools/todo.py`: add/list/done/clear in
+   registry-closure state (per-session, survives compaction by never entering
+   messages; event-logged like any tool). Loop renders v2 + registers todo
+   ONLY behind `planner_prompt` (B0–B6 prompts/tools byte-identical when off);
+   `b7` = b6 + flag, `prompt_version: v2`. 6 tests (versions, render tokens,
+   todo round-trip/errors/isolation, loop v2 wiring).
+2. **Why:** Prompt changes are the easiest confound in ablation science — the
+   registry makes them config diffs with a logged version. Scratchpad outside
+   messages beats "pinned tier" placement (immune to compaction entirely).
+3. **Theory:** Workflow prompts (explore→plan→edit→verify) externalize the
+   plan so the model can be held to it; few-shots demonstrate the tool
+   grammar weak models otherwise invent (cf. fence shapes). B7's delta, if
+   any, measures planning, not plumbing.
+
+### Step 34b — Local pilot: running in background (results pending)
+
+---
+
 ## Next Phases (Not Yet Implemented — For Reference)
 
 - **Phase 3:** Ablation ladder B1–B8 — code + local-model ($0) measurement per rung;
-  Gemini matrices only at the end (spend discipline). B1–B6 + B8 built; B6 first
-  live mechanism proof; B7 planner remaining.
+  Gemini matrices only at the end (spend discipline). B1–B8 ALL built (B4–B8
+  out of order, noted); B6 first live mechanism proof; B7 pilot pending.
 - **Phase 4:** Policy layer + Web UI (FastAPI + React, context inspector, eval dashboard)
 - **Phase 5:** Credibility run (held-out tasks, SWE-bench subset, results.md)
 - **Phase 6:** MCP client, event-stream adapter, upstream PR, README, video, blog, v1.0 release

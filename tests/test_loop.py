@@ -26,9 +26,10 @@ async def _pytest(cwd: object) -> subprocess.CompletedProcess[str]:
 
 
 def test_fresh_context_isolation():
-    a, b = fresh_context("task A"), fresh_context("task B")
+    a, b = fresh_context("task A", "SYS"), fresh_context("task B", "SYS")
     assert a is not b and a[1]["content"] != b[1]["content"]
     assert a[0]["role"] == "system"  # pinned system prompt survives
+    assert a[0]["content"] == "SYS"
 
 
 @pytest.mark.asyncio

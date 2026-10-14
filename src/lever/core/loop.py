@@ -25,24 +25,24 @@ from .guards import (
 from .session import Session
 from .verify import VERIFY_MAX_ROUNDS, verify_completion
 
-SYSTEM_B0 = (
-    "You are a coding agent in a workspace. Use the available tools "
-    "(read_file, grep, edit_file, write_file, bash) to complete the task. "
-    "When the task is done, answer with a short summary and call no tools."
-)
-
 # Empty turns (no text, no calls) are transient model-side hiccups, not "done".
 # Retry them within the step budget instead of stopping. Constant across all
-# ablation configs, so it cannot bias B0-vs-B8 comparisons.
+# ablation configs, so it cannot bias comparisons.
 MAX_EMPTY_RETRIES = 3
 
 
-def fresh_context(task: str) -> list[dict[str, Any]]:
+def fresh_context(task: str, system_text: str) -> list[dict[str, Any]]:
     """One isolated context per task — no history leaks between tasks."""
     return [
-        {"role": "system", "content": SYSTEM_B0},
+        {"role": "system", "content": system_text},
         {"role": "user", "content": task},
     ]
+
+
+def select_prompt_version(config: Any) -> str:
+    if bool(getattr(config, "planner_prompt", False)):
+        return "v2"
+    return str(getattr(config, "prompt_version", "v1") or "v1")
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -122,7 +122,12 @@ async def run_loop(
 
     store.append(Event(session_id=session.session_id, seq=0,
                        type="user_message", data={"content": task}))
-    messages = fresh_context(task)
+    from ..prompts.registry import render_system
+
+    prompt_version = select_prompt_version(config)
+    sys_base = render_system(
+        prompt_version, [t for t in tools.by_name])
+    messages = fresh_context(task, sys_base)
     want_map = bool(getattr(config, "repo_map", False))
     want_mask = bool(getattr(config, "observation_masking", False))
     want_compact = bool(getattr(config, "compaction", False))
@@ -132,8 +137,9 @@ async def run_loop(
     if want_map:
         from ..context.repomap import build_repomap
 
-        messages[0]["content"] += ("\n\n# Repository map (pinned):\n"
-                                   + build_repomap(workspace, task))
+        messages[0]["content"] = (
+            sys_base + "\n\n# Repository map (pinned):\n"
+            + build_repomap(workspace, task))
     trace: list[LoopIteration] = []
     stopped_by: StoppedBy = "model"
     stop_reason = ""
@@ -306,7 +312,7 @@ async def run_loop(
                     str(e.args.get("path", "")) for e in events
                     if e.tool in ("edit_file", "write_file") and e.args.get("path"))
                 messages[0]["content"] = (
-                    SYSTEM_B0 + "\n\n# Repository map (pinned):\n"
+                    sys_base + "\n\n# Repository map (pinned):\n"
                     + build_repomap(workspace, task, touched))
             trace.append(LoopIteration(index=len(trace) + 1, outcome="tool_calls",
                                        tool_events=events, context_size=ctx_size))
