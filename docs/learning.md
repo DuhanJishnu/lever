@@ -386,6 +386,7 @@
 | 23–24 | `evals/runner.py` (guards), `evals/analyze.py`, `docs/ablations.md`, `providers/local.py`, `docs/local_model.md` | 2–3 |
 | 25 | `providers/local.py` (fences, docs, no-`tools`), server flags | local |
 | 26 | `tools/base.py` (head/tail), `tools/fs.py` (ranged read), `tools/registry.py` (flag), `evals/configs.json` (b2) | 3 |
+| 27 | `context/repomap.py` (new pkg), `core/loop.py` (pin + refresh), `evals/configs.json` (b3), `tests/test_repomap.py` | 3 |
 
 ---
 
@@ -527,6 +528,7 @@
 | 24 | Local provider behind the same Protocol | `providers/local.py`, `docs/local_model.md` | $0 dev loops; ladders stay single-provider or they compare models |
 | 25 | Fence protocol + --no-jinja | `providers/local.py`, server flags | Small models get a text tool channel; flaky server features get disabled |
 | 26 | B2 truncation + ranged reads | `tools/base.py`, `tools/fs.py`, `tools/registry.py` | Bounded context per call; second keep-on-mechanism rung |
+| 27 | B3 repo map (ast + PageRank) | `context/repomap.py`, `core/loop.py` (pin + refresh) | Structure-first orientation; pure function, cheap rebuilds |
 
 ---
 
@@ -629,6 +631,48 @@
 3. **Theory:** Same status as B1 for the same reason (ceiling/noise, not the
    feature). The ladder's keep-on-mechanism rows are IOUs the Gemini matrix
    redeems at the end — tracked explicitly so none is forgotten.
+
+---
+
+## Phase 3: B3 repo map (14 Oct 2026) — Step 27
+
+### Step 27a — Implementation (`context/repomap.py`, `loop.py`)
+
+1. **What:** New `context/` package. `scan_file()` parses `.py` with stdlib
+   `ast` (exact defs with signatures via `ast.unparse`, referenced names,
+   import edges) — no tree-sitter dependency for a Python-only eval set
+   (polyglot parsing noted as future work). `build_graph()` links files that
+   use symbols others define. Hand-rolled 50-iteration PageRank with
+   personalization (task-mentions ×3, touched-files ×2). `build_repomap()`
+   renders `file [rank]` + `kind name(sig) # Lineno` under 1500 tokens
+   (~6000 chars), greedy fit. Loop pins the map into the system message and
+   rebuilds it after any successful edit/write (`_mutated()`), tracking
+   touched paths — refresh is cheap because the function is pure.
+   `configs.json` gains `b3` (all three flags on). 6 unit tests (scan, edges,
+   personalization direction, budget fit, empty ws, cache-dir skip).
+2. **Why:** Multi-file tasks (m01–m04) require finding the right files; the
+   map front-loads structure so the model doesn't discover it one `read_file`
+   at a time. Pinned-into-system = survives everything (compaction later must
+   preserve tier-0). ast-over-tree-sitter: exactness beats generality when
+   every task is Python — one less native dependency to break installs.
+3. **Theory:** Personalized PageRank = "important" means referenced-by-others
+   AND looked-at-by-you (task/touched). Rank order is placement (Lost in the
+   Middle), and the 12-defs-per-file cap keeps head files readable. Pure
+   rebuild-on-mutation beats incremental graph patching at this scale.
+
+### Step 27b — Local pilot: map present, tiny repos (results pending)
+
+1. **What:** m01 pilot (b0–b2 finished, b3 + m02 in background): all configs
+   read `a.py`/`b.py` first try — but b0–b2 also read a hallucinated `util.py`
+   that doesn't exist yet, while b3 (map pinned, verified in its system
+   message) read only real files in 3 steps. Two-file repos can't discriminate
+   a ranking feature; the honest test needs 10+ files (noted for task
+   hardening). Full table when the background matrix lands.
+2. **Why:** Record mechanism evidence now (map renders, pins, refreshes;
+   no hallucinated reads in the one b3 trace so far), outcome later.
+3. **Theory:** Orientation features pay off with scale — evaluating a map on a
+   2-file repo is like testing a search engine on one document. Say so
+   plainly rather than claiming a win.
 
 ---
 

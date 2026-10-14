@@ -40,6 +40,16 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return max(1, sum(len(str(m.get("content", ""))) for m in messages) // 4)
 
 
+def _mutated(events: list[ToolEvent]) -> bool:
+    """Did any tool turn actually change a file? (edit applied / file wrote)."""
+    for e in events:
+        if e.tool == "edit_file" and "Edit applied" in e.result:
+            return True
+        if e.tool == "write_file" and e.result.startswith("Wrote "):
+            return True
+    return False
+
+
 StoppedBy = Literal["model", "guardrail", "max_steps", "empty"]
 
 
@@ -87,6 +97,13 @@ async def run_loop(
     store.append(Event(session_id=session.session_id, seq=0,
                        type="user_message", data={"content": task}))
     messages = fresh_context(task)
+    want_map = bool(getattr(config, "repo_map", False))
+    touched: set[str] = set()
+    if want_map:
+        from ..context.repomap import build_repomap
+
+        messages[0]["content"] += ("\n\n# Repository map (pinned):\n"
+                                   + build_repomap(workspace, task))
     trace: list[LoopIteration] = []
     stopped_by: StoppedBy = "model"
     answer = ""
@@ -166,6 +183,17 @@ async def run_loop(
                                    data={"name": name, "result": result}))
                 messages.append({"role": "tool", "name": name, "content": result})
                 events.append(ToolEvent(tool=name, args=cargs, result=result))
+            if want_map and _mutated(events):
+                # A file changed: refresh the pinned map so later turns see
+                # new/moved definitions. Cheap on small repos; rebuilds only.
+                from ..context.repomap import build_repomap
+
+                touched.update(
+                    str(e.args.get("path", "")) for e in events
+                    if e.tool in ("edit_file", "write_file") and e.args.get("path"))
+                messages[0]["content"] = (
+                    SYSTEM_B0 + "\n\n# Repository map (pinned):\n"
+                    + build_repomap(workspace, task, touched))
             trace.append(LoopIteration(index=len(trace) + 1, outcome="tool_calls",
                                        tool_events=events, context_size=ctx_size))
         else:
