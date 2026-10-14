@@ -74,8 +74,7 @@ truncation+ranged-reads didn't break completion (both b2 runs stop cleanly),
 and per-run tokens stay an order of magnitude below thrash runs. Real B2
 measurement awaits Gemini pilots.
 
-## m02 saga (local, $0) — the ladder working as intended
-| run | b0 | b1 | b2 | b3 |
+## m02 saga (local, $0) — the ladder working as intended| run | b0 | b1 | b2 | b3 |
 |---|---|---|---|---|
 | first | fail (hallucinated verify) | fail (grep broke) | **PASS** (ambiguity → `replace_all`) | fail (1-step: single-quote fence) |
 | second | **PASS** | fail | fail | **PASS** (after quote fix) |
@@ -106,3 +105,15 @@ Raw JSONL is temp (see learning log); the committed record is this table.
 
 B8 live proof pending: b8 seeds 5-9 hunting a thrash-cut. Mechanism proven by
 scripted tests; KEEP on mechanism meanwhile.
+
+## B4 local pilot (14 Oct 2026) -- b01/b02 x all configs, up to 6 seeds
+
+b4 == b3 on every aggregate (identical tokens/steps): masking is a no-op
+below 7 tool results, and no b4 run went long. Mechanism proven instead by
+`test_loop_masks_old_observations` (8 scripted turns: provider-bound history
+shows elided markers, events keep full text).
+
+**Decision: KEEP on mechanism, UNMEASURED live.** Masking only matters on
+long histories; local runs are too short to engage it. The honest B4 test
+needs a 15+ step run under b4 (or the Gemini matrix, where histories run
+longer). No-harm proven: b4 never diverges from b3.

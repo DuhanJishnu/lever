@@ -123,6 +123,36 @@ async def test_loop_records_structured_tool_calls(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_loop_masks_old_observations(tmp_path):
+    """With observation_masking, provider-bound history elides old tool
+    outputs while events keep full text (integration, deterministic)."""
+    from lever.core.config import HarnessConfig as HC
+
+    calls = []
+    for i in range(8):
+        calls.append(ModelResponse(
+            text="", tool_calls=[ToolCall(name="bash", args={"cmd": f"echo {i}"})]))
+    calls.append(ModelResponse(text="done"))
+    prov = FakeProvider(calls)
+    store = EventStore(tmp_path / "e.db")
+    session = Session(source=tmp_path)
+    session.open(base_dir=tmp_path / "ws")
+    cfg = HC.b0(max_steps=12, observation_masking=True)
+    result = await run_loop(provider=prov, session=session, task="t",
+                            config=cfg, store=store, cache=None)
+    assert result.answer == "done"
+    last_request = prov.calls[-1]["messages"]
+    tool_contents = [m["content"] for m in last_request if m.get("role") == "tool"]
+    assert any("elided" in c for c in tool_contents)  # old masked
+    assert any("echo 7" in c for c in tool_contents)  # recent full
+    # events keep everything
+    stored = [e for e in store.read(session.session_id) if e.type == "tool_result"]
+    assert all("elided" not in str(e.data.get("result", "")) for e in stored)
+    assert any("echo 0" in str(e.data.get("result", "")) for e in stored)
+    store.close()
+
+
+@pytest.mark.asyncio
 async def test_e2e_toy_bug_fixed(tmp_path):
     """Acceptance: scripted agent reads, edits, tests a one-line bug end-to-end."""
     repo = tmp_path / "repo"

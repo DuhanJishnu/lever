@@ -123,6 +123,7 @@ async def run_loop(
                        type="user_message", data={"content": task}))
     messages = fresh_context(task)
     want_map = bool(getattr(config, "repo_map", False))
+    want_mask = bool(getattr(config, "observation_masking", False))
     touched: set[str] = set()
     if want_map:
         from ..context.repomap import build_repomap
@@ -158,7 +159,13 @@ async def run_loop(
             store.append(Event(session_id=session.session_id, seq=0,
                                type="model_request",
                                data={"messages": messages, "model": model_name}))
-            resp = await _generate(provider, messages, tools.definitions, config, cache, seed)
+            if want_mask:
+                from ..context.masking import mask_observations
+
+                send_messages, _n_masked = mask_observations(messages)
+            else:
+                send_messages = messages
+            resp = await _generate(provider, send_messages, tools.definitions, config, cache, seed)
             store.append(Event(session_id=session.session_id, seq=0,
                                type="model_response", data=resp.model_dump()
                                if hasattr(resp, "model_dump") else dict(resp)))

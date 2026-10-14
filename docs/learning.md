@@ -389,6 +389,7 @@
 | 27 | `context/repomap.py` (new pkg), `core/loop.py` (pin + refresh), `evals/configs.json` (b3), `tests/test_repomap.py` | 3 |
 | 28 | `tools/grep.py` (resolve fix), `providers/local.py` (quote shapes), `tests/test_tools.py` + `test_providers.py` | 3–local |
 | 29 | `core/guards.py` (tracker+factories), `core/loop.py` (wire), `core/events.py` (nudge event), `core/config.py` + providers + runner (seed), `tests/test_guards.py` | 8 |
+| 30 | `context/masking.py` (new), `core/loop.py` (send path), `tests/test_repomap.py` + `test_loop.py`, `evals/configs.json` (b4) | 4 |
 
 ---
 
@@ -534,6 +535,7 @@
 | 28 | Grep path fix + fence quotes | `tools/grep.py`, `providers/local.py` | Red traces find unit-test-blind bugs; cover observed shapes |
 | 29 | B8 loop guard (guards + tracker) | `core/guards.py`, `core/loop.py`, seed plumbing | Stop thrash early; seeds must be real replicates |
 | 30 | Fence multi-line + regex escaping | `providers/local.py` | Parse whole block first; test backslash inputs |
+| 31 | B4 masking (keep-6 + placeholder) | `context/masking.py`, `core/loop.py` | No-op when short; integration test proves channel |
 
 ---
 
@@ -731,6 +733,29 @@
    gave false confidence because no test contained one.
 3. **Theory:** Test the scary characters, not just the happy path. Any parser
    touching model output needs a backslash/quote/unicode case on day one.
+
+---
+
+## Phase 3: B4 observation masking (14 Oct 2026) — Step 31
+
+### Step 31 — Masking (`context/masking.py`, loop send path)
+
+1. **What:** `mask_observations()` keeps the last 6 tool results, replaces
+   older with `[output of NAME elided (L lines, C chars). Re-run if needed.]`.
+   Applies ONLY to the provider-bound copy (events keep full text); assistant
+   reasoning/calls never masked; message positions preserved so call/response
+   pairing stays valid on every provider. Loop gates on `observation_masking`;
+   `b4` = b3 + flag. 4 unit tests (keep-last-K, reasoning intact, short
+   no-op + input immutability) + loop integration test (8 scripted turns:
+   late provider requests show elided markers, events full).
+2. **Why:** Thrash runs drown in repeated full outputs; bounding old
+   observations is the cheapest context lever. Masking the send copy (not the
+   log) keeps replay exact — the same split as truncation.
+3. **Theory:** Old tool outputs are the most expendable context (decisions
+   were already made from them); the placeholder preserves recoverability
+   (what/when/how-big + re-run affordance). Live: b4 == b3 everywhere
+   (short-run no-op, as designed) — engagement needs 7+ tool results, proven
+   by the integration test instead. KEEP on mechanism, UNMEASURED live.
 
 ---
 

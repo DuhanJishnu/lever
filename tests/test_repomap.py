@@ -72,3 +72,50 @@ def test_repomap_skips_caches(tmp_path):
     (tmp_path / "__pycache__").mkdir()
     (tmp_path / "__pycache__" / "junk.py").write_text("x = 1\n", encoding="utf-8")
     assert "junk.py" not in build_repomap(tmp_path)
+
+
+def _history(n_tool: int) -> list[dict]:
+    msgs: list[dict] = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "task"},
+    ]
+    for i in range(n_tool):
+        msgs.append({"role": "assistant", "content": "",
+                     "tool_calls": [{"name": "bash", "args": {}}]})
+        msgs.append({"role": "tool", "name": "bash",
+                     "content": f"output number {i}\nline2\nline3"})
+    return msgs
+
+
+def test_masking_keeps_last_k():
+    from lever.context.masking import mask_observations
+
+    masked, n = mask_observations(_history(10), keep_last=6)
+    assert n == 4
+    tools = [m for m in masked if m.get("role") == "tool"]
+    assert len(tools) == 10
+    assert all("elided" in t["content"] for t in tools[:4])
+    assert all("output number" in t["content"] for t in tools[4:])
+    ph = tools[0]["content"]
+    assert "bash" in ph and "Re-run if needed" in ph
+
+
+def test_masking_never_touches_reasoning():
+    from lever.context.masking import mask_observations
+
+    masked, n = mask_observations(_history(10), keep_last=2)
+    assert n == 8
+    assistants = [m for m in masked if m.get("role") == "assistant"]
+    assert len(assistants) == 10
+    assert all(m.get("tool_calls") for m in assistants)  # calls intact
+    assert masked[0]["content"] == "sys" and masked[1]["content"] == "task"
+
+
+def test_masking_short_history_untouched():
+    from lever.context.masking import mask_observations
+
+    msgs = _history(2)
+    masked, n = mask_observations(msgs, keep_last=6)
+    assert n == 0 and masked == msgs
+    # input never mutated
+    assert "elided" not in msgs[3]["content"]
