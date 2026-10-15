@@ -338,6 +338,9 @@ def main() -> None:
                     help="Empirical tokens/run for cost estimates (measured "
                          "78-run matrix: ~21-26k with thinking on).")
     args = ap.parse_args()
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")  # repo .env wins regardless of cwd
     if not args.live:
         if not args.dry_run:
             print("NOT live: forcing --dry-run (pass --live to spend API budget).")
