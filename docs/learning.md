@@ -544,6 +544,7 @@
 | 34 | B7 planner (registry + todo) | `prompts/v1+v2`, `prompts/registry.py`, `tools/todo.py` | Prompt as config diff; scratchpad survives compaction |
 | 35 | Policy engine (4 rules) | `policy/engine.py`, `policy/rules.py`, loop wiring | Code, not prompts; history-scanned state |
 | 36 | Server (REST+SSE, approvals) | `server/app.py`, `sessions.py`, CLI serve | Futures for approvals; ASGI tests, not TestClient |
+| 37 | Web UI (Run/Sessions/Evals) | `web/` Vite+React+Tailwind, `/eval-summary` | Hand-rolled SVG/diff; no Monaco/Recharts |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 
 ---
@@ -968,13 +969,38 @@ scratchpad + outcome unproven — needs Gemini or a stronger local model.
 
 ---
 
+## Phase 4: Web UI (14 Oct 2026) — Step 37
+
+### Step 37 — Console (`web/`, `/eval-summary`)
+
+1. **What:** Hand-scaffolded Vite + React 19 + Tailwind v4 app (no
+   create-vite): Run tab (new-session form, live SSE transcript, context
+   meter, unified-diff viewer, approval modal), Sessions tab (list, replay
+   scrub slider, fork-at-cursor, watch-live), Evals tab (summary-JSON tables +
+   hand-rolled SVG pass-rate bars with CI whiskers). Backend gained
+   `GET /eval-summary` (serves `analyze.py --summary-json` outputs) and a
+   `root` param on `create_app`. `lever serve` + `npm run dev` verified live:
+   session created, ran to done, events/diff/summaries all served; `/api`
+   proxy confirmed end to end.
+2. **Why:** The acceptance demo (start → watch → approve → diff → replay →
+   dashboard) is now fully clickable. Deviations, all documented: no Monaco
+   (unified-diff renderer needs no original/modified plumbing), no Recharts/
+   TanStack (SVG + fetch cover it), system process notes (esbuild postinstall
+   must be approved on npm ≥11; vite needs explicit `--host 127.0.0.1` here).
+3. **Theory:** UI is a thin lens over the event log — every screen reads
+   events, never private state. That constraint is what makes replay, fork,
+   and the dashboard trivially consistent with the run.
+
+---
+
 ## Next Phases (Not Yet Implemented — For Reference)
 
 - **Phase 3:** Ablation ladder B1–B8 — code + local-model ($0) measurement per rung;
   Gemini matrices only at the end (spend discipline). B1–B8 ALL built (B4–B8
   out of order, noted); B6 first live mechanism proof; B7 pilot pending.
-- **Phase 4:** Policy layer + server done; web UI next (React: run view,
-  context inspector, sessions replay, eval dashboard, approval modal)
+- **Phase 4:** DONE (policy + server + web UI). Remaining: Phase 5
+  (held-out credibility + missing Gemini rows) and Phase 6 (MCP, adapter,
+  PR, README results, video, blog, v1.0).
 - **Phase 5:** Credibility run (held-out tasks, SWE-bench subset, results.md)
 - **Phase 6:** MCP client, event-stream adapter, upstream PR, README, video, blog, v1.0 release
 

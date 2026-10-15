@@ -25,4 +25,17 @@ uv run pytest -q
 uv run ruff check src tests
 ```
 
+## Web UI (Phase 4.3)
+
+```powershell
+# backend (REST :8000, SSE, approvals)
+uv run lever serve --port 8000
+# frontend (Vite :5173, proxies /api -> :8000)
+cd web; npm install; npm run dev
+```
+
+Populate the eval dashboard first: `uv run python evals/analyze.py
+--results evals/results/<run>.jsonl --summary-json
+evals/results/<run>_summary.json --charts`.
+
 See `docs/results.md` (later) for eval numbers.

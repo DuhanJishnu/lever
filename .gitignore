@@ -17,3 +17,7 @@ lever_cache/
 .lever_workspaces/
 
 /harness_engineering_distilled
+
+# web UI build outputs
+web/node_modules/
+web/dist/

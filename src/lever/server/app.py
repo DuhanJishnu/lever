@@ -102,7 +102,8 @@ def _policy(workspace: Path, token_budget: int | None) -> Any:
 
 
 def create_app(db_path: str = ".lever_sessions.db",
-               providers: dict[str, Any] | None = None) -> FastAPI:
+               providers: dict[str, Any] | None = None,
+               root: str | Path = ".") -> FastAPI:
     app = FastAPI(title="Lever")
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
@@ -110,6 +111,7 @@ def create_app(db_path: str = ".lever_sessions.db",
     app.state.registry = Registry()
     app.state.store = EventStore(db_path)
     app.state.db_path = db_path
+    app.state.root = str(root)
     app.state.providers = dict(providers or {})
 
     def store() -> EventStore:
@@ -288,6 +290,22 @@ def create_app(db_path: str = ".lever_sessions.db",
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/eval-summary")
+    async def eval_summary() -> dict[str, Any]:
+        """Analyze --summary-json outputs for the dashboard. {} when none."""
+        import glob
+        import json as _json
+
+        out: dict[str, Any] = {}
+        pattern = str(Path(app.state.root) / "evals" / "results" / "*_summary.json")
+        for path in sorted(glob.glob(pattern)):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    out[Path(path).stem] = _json.load(f)
+            except (OSError, ValueError):
+                continue
+        return out
 
     @app.exception_handler(Exception)
     async def _errors(request: Any, exc: Exception) -> JSONResponse:
