@@ -97,10 +97,65 @@ async def run_tests(workspace: Path, timeout: int = VERIFY_TIMEOUT_S) -> tuple[
     except subprocess.TimeoutExpired:
         return False, f"verify: `{_show(cmd)}` TIMED OUT after {timeout}s.", cmd
     tail = ((proc.stdout or "") + (proc.stderr or "")).strip()
-    if proc.returncode == 0:
-        return True, f"verify: `{_show(cmd)}` passed.\n{tail[-500:]}", cmd
-    return False, f"verify: `{_show(cmd)}` FAILED (exit {proc.returncode}).\n" + \
-        trim_report(tail), cmd
+    if proc.returncode != 0:
+        return False, f"verify: `{_show(cmd)}` FAILED (exit {proc.returncode}).\n" + \
+            trim_report(tail), cmd
+    # compileall passes on dangling names (NameError is runtime, e.g. def
+    # renamed but caller not updated). Catch bare calls to undefined names.
+    dangling = undefined_calls(workspace)
+    if dangling:
+        shown = "\n".join(dangling[:10])
+        return False, (f"verify: `{_show(cmd)}` passed syntax, but undefined "
+                       f"name(s) would raise NameError at runtime:\n{shown}\n"
+                       f"Update the call sites to the renamed function."), cmd
+    return True, f"verify: `{_show(cmd)}` passed.\n{tail[-500:]}", cmd
+
+
+def undefined_calls(workspace: Path) -> list[str]:
+    """Bare `name(` calls with no matching def/import/builtin in that file.
+
+    Same-file check only (cheap, no cross-file graph): catches the
+    rename-without-caller bug (def sub_number + result = add_numbers).
+    """
+    import ast
+    import builtins
+
+    builtin_names = set(dir(builtins)) | {"__name__"}
+    hits: list[str] = []
+    for py in _py_files(workspace):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"),
+                             filename=str(py))
+        except (SyntaxError, ValueError):
+            continue
+        defined: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defined.add(node.name)
+                for a in list(node.args.args) + list(node.args.kwonlyargs):
+                    defined.add(a.arg)
+                if node.args.vararg:
+                    defined.add(node.args.vararg.arg)
+                if node.args.kwarg:
+                    defined.add(node.args.kwarg.arg)
+            elif isinstance(node, ast.ClassDef):
+                defined.add(node.name)
+            elif isinstance(node, ast.ImportFrom):
+                for al in node.names:
+                    defined.add(al.asname or al.name.split(".")[0])
+            elif isinstance(node, ast.Import):
+                for al in node.names:
+                    defined.add((al.asname or al.name).split(".")[0])
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                defined.add(node.id)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                name = node.func.id
+                if name not in defined and name not in builtin_names:
+                    rel = py.name if py.parent == workspace else str(py.relative_to(workspace))
+                    hits.append(f"{rel}:{node.lineno}: undefined `{name}()` "
+                                f"(no def/import in this file)")
+    return sorted(hits)
 
 
 def _run_sync(cmd: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:

@@ -1,10 +1,11 @@
 import { Event } from "../api";
+import { Markdown } from "./Markdown";
 
 function short(s: string, n = 600) {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-export function Transcript({ events }: { events: Event[] }) {
+export function Transcript({ events, live }: { events: Event[]; live: boolean }) {
   return (
     <div className="space-y-2 text-sm">
       {events
@@ -19,26 +20,47 @@ export function Transcript({ events }: { events: Event[] }) {
               <span className="rounded bg-slate-700 px-1.5 py-0.5 font-mono">{e.type}</span>
               <span>#{e.seq}</span>
             </div>
-            <Body e={e} />
+            <Body e={e} live={live} />
           </div>
         ))}
+      {live && <RunLoader events={events} />}
     </div>
   );
 }
 
-function Body({ e }: { e: Event }) {
+function RunLoader({ events }: { events: Event[] }) {
+  const last = events[events.length - 1];
+  if (!last) return <Thinking label="starting…" />;
+  if (last.type === "session_end") return null;
+  if (last.type === "user_message") return <Thinking label="thinking…" />;
+  return <Thinking label="working…" />;
+}
+
+function Thinking({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded border border-slate-700/60 bg-slate-800/40 px-3 py-2 text-sm text-slate-400">
+      <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+      {label}
+    </div>
+  );
+}
+
+function Body({ e, live }: { e: Event; live: boolean }) {
   const d = e.data as Record<string, unknown>;
   switch (e.type) {
     case "user_message":
-      return <div className="whitespace-pre-wrap">{String(d.content ?? "")}</div>;
+      return <Markdown text={String(d.content ?? "")} />;
     case "model_response": {
       const calls = (d.tool_calls as Array<{ name: string }> | undefined) ?? [];
       return (
         <div>
-          {d.text ? <div className="whitespace-pre-wrap">{short(String(d.text))}</div> : null}
+          {d.text ? <Markdown text={short(String(d.text), 2000)} /> : null}
           {calls.map((c, i) => (
             <div key={i} className="font-mono text-emerald-300">→ {c.name}()</div>
           ))}
+          {live && calls.length === 0 && !d.text && (
+            <Thinking label="thinking…" />
+          )}
         </div>
       );
     }

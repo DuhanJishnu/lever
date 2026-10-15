@@ -96,10 +96,14 @@ def _provider(kind: str, custom: dict[str, Any] | None = None,
 
 
 def _config(overrides: dict[str, Any]) -> HarnessConfig:
+    # Interactive serve defaults: tolerant edits + loop guard on.
+    # Evals still pin exact behaviour via explicit overrides (see evals/configs.json);
+    # HarnessConfig.b0() itself stays all-off for the ladder.
     base = HarnessConfig.b0()
-    if overrides:
-        base = base.model_copy(update=overrides)
-    return base
+    defaults: dict[str, Any] = {"tolerant_edit": True, "loop_guard": True,
+                                "verify_loop": True}
+    defaults.update(overrides or {})
+    return base.model_copy(update=defaults)
 
 
 SKIP_TREE_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache",
@@ -188,25 +192,89 @@ def _git_show(rec: SessionRecord, rel: str) -> str | None:
     return proc.stdout.decode("utf-8", errors="replace")
 
 
+def _workspace_snapshot(rec: SessionRecord, limit: int = 100) -> str:
+    """File list + git status for follow-ups so the model edits in place.
+
+    Follow-up runs start from a fresh LLM context (see loop.fresh_context),
+    so without this the model cannot resolve "my add function" to add.py
+    and invents canonical names like my_script.py.
+    """
+    assert rec.session is not None and rec.session.workspace is not None
+    try:
+        entries = _tree(rec.session.workspace)
+        files = [e["path"] for e in entries if e.get("type") == "file"][:limit]
+    except (OSError, ValueError):
+        files = []
+    try:
+        diff = rec.session.get_diff()
+    except (OSError, ValueError):
+        diff = ""
+    lines = ["Workspace files (edit these in place, do not invent new filenames):"]
+    lines += [f"- {p}" for p in files] if files else ["- (empty)"]
+    if diff.strip():
+        lines.append("\nCurrent changes (git diff --stat + status):\n" + diff.strip())
+    else:
+        lines.append("\nCurrent changes: none yet")
+    lines.append("\nRule: only edit existing files listed above. Never create a new file "
+                 "unless the user explicitly asks for a new file. "
+                 "Use read/grep to locate the function first.")
+    return "\n".join(lines)
+
+
+def _prior_history(store: Any, sid: str, limit: int = 6) -> str:
+    """Prior user tasks + final answers so 'my add function' stays grounded."""
+    try:
+        events = store.read(sid)
+    except (OSError, ValueError):
+        return ""
+    users = [str(e.data.get("content", "")) for e in events
+             if e.type == "user_message"]
+    answers = [str(e.data.get("answer", "")) for e in events
+               if e.type == "session_end" and e.data.get("answer")]
+    if not users and not answers:
+        return ""
+    parts = ["Prior conversation (same workspace, edits accumulate):"]
+    for i, (u, a) in enumerate(zip(users[-limit:], answers[-limit:] + [""] * limit)):
+        if u:
+            parts.append(f"- task {i + 1}: {u[:1000]}")
+        if a:
+            parts.append(f"  result: {a[:1000]}")
+    # dangling user messages without a paired answer yet
+    if len(users) > len(answers):
+        for u in users[len(answers):][-limit:]:
+            if u not in " ".join(parts):
+                parts.append(f"- task: {u[:1000]}")
+    return "\n".join(parts)
+
+
 def _with_attachments(rec: SessionRecord, content: str,
-                      rels: list[str]) -> str:
-    """Build a follow-up task: attached workspace files + instruction.
+                      rels: list[str], snapshot: str = "",
+                      history: str = "") -> str:
+    """Build a follow-up task: workspace snapshot + history + files + instruction.
 
     Same workspace persists across runs, so edits accumulate — the
     interactive loop. Big files truncate with a marker (never silent).
+    Snapshot/history are always included (even with no @-files) so a bare
+    "change my add function" still resolves to the existing file.
     """
-    if not rels:
-        return content
     parts = []
-    for rel in rels[:10]:  # hard cap: 10 files per message
-        try:
-            text, truncated = _read_ws_file(rec, rel)
-        except HTTPException as e:
-            text, truncated = f"(unreadable: {e.detail})", True
-        note = " (truncated)" if truncated else ""
-        parts.append(f"=== {rel}{note} ===\n{text}")
-    return ("Context files (already in your workspace):\n\n"
-            + "\n\n".join(parts) + f"\n\nTask: {content}")
+    if history.strip():
+        parts.append(history.strip())
+    if snapshot.strip():
+        parts.append(snapshot.strip())
+    if rels:
+        attached = []
+        for rel in rels[:10]:  # hard cap: 10 files per message
+            try:
+                text, truncated = _read_ws_file(rec, rel)
+            except HTTPException as e:
+                text, truncated = f"(unreadable: {e.detail})", True
+            note = " (truncated)" if truncated else ""
+            attached.append(f"=== {rel}{note} ===\n{text}")
+        parts.append("Context files (already in your workspace):\n\n"
+                     + "\n\n".join(attached))
+    parts.append(f"Task: {content}")
+    return "\n\n".join(parts)
 
 
 def _policy(workspace: Path, token_budget: int | None) -> Any:
@@ -330,7 +398,9 @@ def create_app(db_path: str = ".lever_sessions.db",
     def _with_attachments_open(rec: SessionRecord, content: str,
                                  rels: list[str]) -> str:
         ensure_workspace(rec)
-        return _with_attachments(rec, content, rels)
+        snapshot = _workspace_snapshot(rec)
+        history = _prior_history(store(), rec.id)
+        return _with_attachments(rec, content, rels, snapshot, history)
 
     @app.post("/sessions/{sid}/messages")
     async def post_message(sid: str, body: MessageBody) -> dict[str, Any]:

@@ -548,6 +548,7 @@
 | 38 | IDE UI (files+@+models) | file endpoints, follow-ups, `GeminiProvider(model=)` | Only demo-necessary interactivity |
 | 38 | Calibration tasks x01-x04/m05-m06 | `evals/tasks/`, `SPLIT.md`, `regen_more.py` | Discrimination by design; generate diffs |
 | 39 | Calibration pilot + grep warning | local b0/b1 on new tasks | Edit-fails nonzero; headroom restored |
+| 40 | IDE console follow-ups+markdown | continuous polling, Markdown, loaders | Poll-forever; lens stays honest |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 
 ---

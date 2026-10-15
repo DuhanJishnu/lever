@@ -13,5 +13,14 @@ export default defineConfig({
         rewrite: (p) => p.replace(/^\/api/, ""),
       },
     },
+    watch: {
+      ignored: [
+        "**/AppData/**",
+        "**/NTUSER.DAT*",
+        "**/OneDrive/**",
+        "**/.git/**",
+        "**/node_modules/**",
+      ],
+    },
   },
 });

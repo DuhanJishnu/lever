@@ -28,6 +28,10 @@ export function FileView({ sid, path, showDiff, refreshKey }: {
   if (showDiff && original !== null && norm(original) !== norm(content)) {
     return <UnifiedDiff original={norm(original)} modified={norm(content)} />;
   }
+  if (showDiff && original === null) {
+    // Untracked/new file (git show HEAD:path misses it): render whole file as added.
+    return <UnifiedDiff original={""} modified={norm(content)} />;
+  }
   if (showDiff) return <div className="text-sm text-slate-500">no changes in this file</div>;
   const lines = norm(content).split("\n");
   return (

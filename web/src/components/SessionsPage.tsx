@@ -76,7 +76,7 @@ export function SessionsPage({ onOpen }: { onOpen: (id: string) => void }) {
               </button>
               {forked && <span className="font-mono text-xs text-emerald-300">→ {forked}</span>}
             </div>
-            <Transcript events={shown} />
+            <Transcript events={shown} live={false} />
           </div>
         )}
       </div>

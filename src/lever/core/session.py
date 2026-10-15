@@ -55,7 +55,22 @@ class Session:
                 text=True,
                 timeout=15,
             )
-            return out.stdout.strip()
+            stat = out.stdout.strip()
+            st = subprocess.run(
+                ["git", "status", "--short"],
+                check=False,
+                cwd=self.workspace,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            untracked = "\n".join(
+                line for line in st.stdout.splitlines()
+                if line.startswith("??")
+            ).strip()
+            if stat and untracked:
+                return stat + "\n" + untracked
+            return stat or untracked
         except OSError:
             return ""
 

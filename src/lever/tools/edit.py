@@ -41,11 +41,13 @@ def make_edit_tool(root: Path, tolerant: bool = False) -> Tool:
         hits = content.count(old)
         if hits == 1 and not replace_all:
             return _apply(path, args.get("path"), content,
-                          content.replace(old, new, 1))
+                          content.replace(old, new, 1),
+                          old_block=old, new_block=new)
         if hits > 1:
             if replace_all:
                 return _apply(path, args.get("path"), content,
-                              content.replace(old, new))
+                              content.replace(old, new),
+                              old_block=old, new_block=new)
             locs = _locations(content, old)
             shown = ", ".join(f"line {n}" for n in locs[:MAX_LOCATIONS_SHOWN])
             extra = (f" (+{len(locs) - MAX_LOCATIONS_SHOWN} more)"
@@ -57,9 +59,22 @@ def make_edit_tool(root: Path, tolerant: bool = False) -> Tool:
             )
         # hits == 0 from here on
         if not tolerant:
+            hint = ""
+            try:
+                best = _fuzzy_candidates(content, old)
+                if best:
+                    (s, e, score) = best[0]
+                    snippet = content[s:e].strip().splitlines()
+                    preview = "\n".join(snippet[:6])
+                    ls, le = _line_range(content, s, e)
+                    hint = (f" Closest match at lines {ls}-{le} "
+                            f"(similarity {score:.2f}):\n{preview}")
+            except (ValueError, IndexError):
+                hint = ""
             return (
                 "edit_file: old_str not found (exact match required in B0). "
                 "Re-read the file and copy the block exactly, including whitespace."
+                + hint
             )
 
         # ---- stage 2: whitespace-insensitive (unique candidate only) ----
@@ -68,7 +83,8 @@ def make_edit_tool(root: Path, tolerant: bool = False) -> Tool:
             start, end = stage2[0]
             updated = content[:start] + new + content[end:]
             return _apply(path, args.get("path"), content, updated,
-                          note="matched ignoring whitespace/indentation")
+                          note="matched ignoring whitespace/indentation",
+                          old_block=old, new_block=new)
         if len(stage2) > 1:
             shown = ", ".join(f"lines {a}-{b}" for a, b in stage2[:3])
             return (
@@ -77,13 +93,23 @@ def make_edit_tool(root: Path, tolerant: bool = False) -> Tool:
                 f"make it unique."
             )
 
-        # ---- stage 3: fuzzy window (unique candidate only) ----
+        # ---- stage 3: fuzzy window (unique candidate above threshold only) ----
         best = _fuzzy_candidates(content, old)
-        if len(best) == 1 and best[0][2] >= FUZZY_THRESHOLD:
-            (start, end, score) = best[0]
+        above = [t for t in best if t[2] >= FUZZY_THRESHOLD]
+        if len(above) == 1:
+            (start, end, score) = above[0]
             updated = content[:start] + new + content[end:]
             return _apply(path, args.get("path"), content, updated,
-                          note=f"fuzzy match (similarity {score:.2f})")
+                          note=f"fuzzy match (similarity {score:.2f})",
+                          old_block=old, new_block=new)
+        if len(above) > 1:
+            shown = ", ".join(
+                f"lines {a}-{b}" for a, b in
+                (_line_range(content, s, e) for s, e, _ in above[:3]))
+            return (
+                f"edit_file: old_str not found; fuzzy match is ambiguous "
+                f"({shown}, ...). Add more context lines to make it unique."
+            )
         if best:
             (start, end, score) = best[0]
             snippet = content[start:end].strip().splitlines()
@@ -125,7 +151,8 @@ def make_edit_tool(root: Path, tolerant: bool = False) -> Tool:
     )
 
 
-def _apply(path: Path, shown: Any, before: str, after: str, note: str = "") -> str:
+def _apply(path: Path, shown: Any, before: str, after: str, note: str = "",
+             old_block: str = "", new_block: str = "") -> str:
     if after == before:
         return "Edit applied (no visible change)."
     if path.suffix == ".py":
@@ -147,7 +174,47 @@ def _apply(path: Path, shown: Any, before: str, after: str, note: str = "") -> s
         )
     )
     prefix = f"Edit applied ({note}).\n" if note else "Edit applied.\n"
-    return prefix + diff if diff else prefix + "(no visible change)"
+    out = prefix + diff if diff else prefix + "(no visible change)"
+    warn = _rename_warning(after, old_block, new_block)
+    return out + warn
+
+
+def _rename_warning(after: str, old_block: str, new_block: str) -> str:
+    """Warn when a `def` rename leaves stale call sites in the same file.
+
+    compile() passes on dangling names (NameError is runtime), so without
+    this the agent in your screenshot stops after renaming
+    add_numbers -> sub_numbers while line 9 still calls add_numbers.
+    """
+    import re
+
+    if not old_block or not new_block:
+        return ""
+    old_defs = re.findall(r"^\s*def\s+(\w+)\s*\(", old_block, re.MULTILINE)
+    new_defs = re.findall(r"^\s*def\s+(\w+)\s*\(", new_block, re.MULTILINE)
+    if len(old_defs) != 1 or len(new_defs) != 1:
+        return ""
+    old_name, new_name = old_defs[0], new_defs[0]
+    if old_name == new_name:
+        return ""
+    if not re.search(rf"^\s*def\s+{re.escape(new_name)}\s*\(", after, re.MULTILINE):
+        return ""
+    lines = []
+    for i, ln in enumerate(after.splitlines(), start=1):
+        if re.search(rf"\b{re.escape(old_name)}\s*\(", ln) and \
+                not re.search(rf"^\s*def\s+{re.escape(old_name)}\s*\(", ln):
+            lines.append(str(i))
+    if not lines:
+        return ""
+    return (
+        f"\nWarning: `{old_name}` renamed to `{new_name}` but `{old_name}` "
+        f"is still referenced at line(s) {', '.join(lines)}; update the call "
+        f"sites too or Python raises NameError at runtime. "
+        f"Do NOT stop here: make the second edit now, e.g. "
+        f"edit_file(path, old_str=`{old_name}(`, new_str=`{new_name}(`) "
+        f"for each stale call, then re-read the file. "
+        f"Use grep to find all uses."
+    )
 
 
 def _locations(content: str, old: str) -> list[int]:

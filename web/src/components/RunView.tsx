@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, SessionSummary } from "../api";
 import { useSessionEvents } from "../hooks";
 import { Approvals } from "./Approvals";
@@ -14,26 +14,32 @@ export function IDE({ sid, onSession }: {
   onSession: (id: string) => void;
 }) {
   const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const summaryRef = useRef<SessionSummary | null>(null);
   const [openPath, setOpenPath] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(true);
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [tick, setTick] = useState(0);
-  const live = summary === null || ["running", "waiting_approval"].includes(summary.status);
+  const live = !summary || ["running", "waiting_approval", "idle"].includes(summary.status);
   const events = useSessionEvents(sid, live);
 
   useEffect(() => {
     if (!sid) return;
-    const t = setInterval(async () => {
+    let stop = false;
+    const poll = async () => {
       try {
         const s = await api.getSession(sid);
+        if (stop) return;
+        const was = summaryRef.current?.status;
+        summaryRef.current = s;
         setSummary(s);
-        if (s.status === "done" || s.status === "error") {
-          clearInterval(t);
+        if ((s.status === "done" || s.status === "error") && was !== s.status) {
           setTick((n) => n + 1);
         }
-      } catch { /* gone */ }
-    }, 1000);
-    return () => clearInterval(t);
+      } catch { /* session gone */ }
+    };
+    poll();
+    const t = setInterval(poll, 1000);
+    return () => { stop = true; clearInterval(t); };
   }, [sid]);
 
   useEffect(() => {
@@ -68,7 +74,7 @@ export function IDE({ sid, onSession }: {
               {summary?.error && <span className="text-red-300">{summary.error}</span>}
             </div>
             <div className="mb-3"><ContextMeter sid={sid} events={events} /></div>
-            <div className="mb-3 max-h-[46vh] overflow-auto"><Transcript events={events} /></div>
+            <div className="mb-3 max-h-[46vh] overflow-auto"><Transcript events={events} live={live} /></div>
             <PromptBox sid={sid} disabled={!summary || !["done", "error", "idle"].includes(summary.status)} onSend={followUp} />
             <div className="mt-1 text-xs text-slate-500">
               {summary && !["done", "error", "idle"].includes(summary.status)
@@ -112,7 +118,8 @@ function StatusBadge({ status }: { status: string }) {
     : status === "error" ? "bg-red-700"
     : status === "waiting_approval" ? "bg-amber-600"
     : "bg-sky-700";
-  return <span className={`rounded px-2 py-0.5 text-xs ${color}`}>{status}</span>;
+  const pulse = ["running", "waiting_approval"].includes(status) ? " animate-pulse" : "";
+  return <span className={`rounded px-2 py-0.5 text-xs ${color}${pulse}`}>{status}</span>;
 }
 
 function parseChanged(stat: string): Set<string> {
@@ -120,6 +127,8 @@ function parseChanged(stat: string): Set<string> {
   for (const line of stat.split("\n")) {
     const m = line.match(/^\s*(\S.*?)\s+\|\s+\d+/);
     if (m) out.add(m[1].trim());
+    const u = line.match(/^\?\?\s+(.+?)\s*$/);
+    if (u) out.add(u[1].trim());
   }
   return out;
 }
