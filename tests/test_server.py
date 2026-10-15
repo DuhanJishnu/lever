@@ -135,3 +135,73 @@ async def test_fork_copies_prefix(tmp_path):
     # forked workspace opens lazily on first run, not at fork time
     assert (await client.get(f"/sessions/{child}/diff")).status_code == 404
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_providers_catalog(tmp_path):
+    client = await _mk(tmp_path)
+    provs = {p["id"]: p for p in (await client.get("/providers")).json()}
+    assert set(provs) == {"auto", "fake", "local", "gemini"}
+    assert provs["fake"]["configured"] is True
+    await client.aclose()
+
+@pytest.mark.asyncio
+async def test_files_tree_content_and_diff(tmp_path):
+    _repo(tmp_path)
+    client = await _mk(tmp_path)
+    sid = (await client.post("/sessions", json={"repo": str(tmp_path)})).json()["id"]
+    await client.post(f"/sessions/{sid}/messages", json={"content": "say hi"})
+    await _wait_done(client, sid)
+    tree = await client.get(f"/sessions/{sid}/files")
+    paths = [e["path"] for e in tree.json()]
+    assert "calc.py" in paths
+    assert all(not p.startswith(".git") for p in paths)
+    file = (await client.get(f"/sessions/{sid}/file", params={"path": "calc.py"})).json()
+    assert "def add" in file["content"] and file["truncated"] is False
+    assert (await client.get(f"/sessions/{sid}/file",
+                             params={"path": "../evil"})).status_code in (400, 404)
+    fd = (await client.get(f"/sessions/{sid}/file-diff",
+                           params={"path": "calc.py"})).json()
+    # untouched file (modulo Windows CRLF normalization in git)
+    assert fd["original"].splitlines() == fd["modified"].splitlines()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_messages_with_attached_files(tmp_path):
+    _repo(tmp_path)
+    client = await _mk(tmp_path)
+    sid = (await client.post("/sessions", json={"repo": str(tmp_path)})).json()["id"]
+    await client.post(f"/sessions/{sid}/messages",
+                      json={"content": "Say hi.", "files": ["calc.py"]})
+    await _wait_done(client, sid)
+    evs = (await client.get(f"/sessions/{sid}/events")).json()
+    first = next(e for e in evs if e["type"] == "user_message")
+    assert "=== calc.py ===" in first["data"]["content"]
+    assert "def add" in first["data"]["content"]
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_create_model_override_recorded(tmp_path):
+    _repo(tmp_path)
+    client = await _mk(tmp_path)
+    created = (await client.post("/sessions", json={
+        "repo": str(tmp_path), "task": "say hi", "provider": "fake",
+        "model": "custom-model"})).json()
+    assert created["model"] == "custom-model"  # requested override echoed
+    await _wait_done(client, created["id"])
+    assert (await client.get(f"/sessions/{created['id']}")).json()["model"] == "fake"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_file_diff_shows_modification(tmp_path):
+    _repo(tmp_path)
+    client = await _mk(tmp_path)
+    sid = (await client.post("/sessions", json={"repo": str(tmp_path)})).json()["id"]
+    await client.post(f"/sessions/{sid}/messages", json={"content": "say hi"})
+    await _wait_done(client, sid)
+    ws = (await client.get(f"/sessions/{sid}/files")).json()
+    assert any(e["path"] == "calc.py" for e in ws if e["type"] == "file")
+    await client.aclose()

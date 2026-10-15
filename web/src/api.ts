@@ -6,8 +6,19 @@ export type SessionSummary = {
   task: string | null;
   status: string;
   error: string;
+  model: string;
+  provider: string;
   pending_approvals: string[];
 };
+
+export type ProviderInfo = {
+  id: string;
+  model: string;
+  configured: boolean;
+  cost: string;
+};
+
+export type FileEntry = { path: string; type: string; size?: number };
 
 export type Event = {
   id: number | null;
@@ -32,8 +43,11 @@ export const api = {
   createSession: (body: object) => req("/sessions", { method: "POST", body: JSON.stringify(body) }),
   listSessions: (): Promise<SessionSummary[]> => req("/sessions"),
   getSession: (id: string): Promise<SessionSummary> => req(`/sessions/${id}`),
-  postMessage: (id: string, content: string) =>
-    req(`/sessions/${id}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
+  postMessage: (id: string, content: string, files: string[] = []) =>
+    req(`/sessions/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content, files }),
+    }),
   getEvents: (id: string, since = 0): Promise<Event[]> =>
     req(`/sessions/${id}/events?since_seq=${since}`),
   getDiff: (id: string): Promise<{ diff: string }> => req(`/sessions/${id}/diff`),
@@ -47,4 +61,10 @@ export const api = {
       method: "POST",
     }),
   evalSummary: (): Promise<Record<string, any>> => req("/eval-summary"),
+  providers: (): Promise<ProviderInfo[]> => req("/providers"),
+  files: (id: string): Promise<FileEntry[]> => req(`/sessions/${id}/files`),
+  fileContent: (id: string, path: string): Promise<{ path: string; content: string; truncated: boolean }> =>
+    req(`/sessions/${id}/file?path=${encodeURIComponent(path)}`),
+  fileDiff: (id: string, path: string): Promise<{ path: string; original: string | null; modified: string }> =>
+    req(`/sessions/${id}/file-diff?path=${encodeURIComponent(path)}`),
 };

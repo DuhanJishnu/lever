@@ -50,8 +50,8 @@ def _extract_system(messages: list[dict[str, Any]]) -> str | None:
 
 
 class GeminiProvider:
-    def __init__(self, api_key: str | None = None) -> None:
-        self.model = os.getenv("LEVER_MODEL", "")
+    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+        self.model = model or os.getenv("LEVER_MODEL", "")
         if not self.model:
             raise ValueError("LEVER_MODEL is not set (see .env.example)")
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")

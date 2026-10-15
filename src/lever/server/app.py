@@ -34,11 +34,13 @@ class CreateBody(BaseModel):
     task: str | None = None
     config: dict[str, Any] = {}
     provider: str = "auto"
+    model: str | None = None
     token_budget: int | None = None
 
 
 class MessageBody(BaseModel):
     content: str
+    files: list[str] = []
 
 
 class ApprovalBody(BaseModel):
@@ -60,7 +62,8 @@ def _read_summaries(root: str) -> dict[str, Any]:
     return out
 
 
-def _provider(kind: str, custom: dict[str, Any] | None = None) -> tuple[Any, str]:
+def _provider(kind: str, custom: dict[str, Any] | None = None,
+              model: str | None = None) -> tuple[Any, str]:
     if custom and kind in custom:
         factory: Any = custom[kind]
         made: tuple[Any, str] = factory()
@@ -77,7 +80,7 @@ def _provider(kind: str, custom: dict[str, Any] | None = None) -> tuple[Any, str
     if kind == "gemini":
         from ..providers.gemini import GeminiProvider
 
-        gemini: Any = GeminiProvider()
+        gemini: Any = GeminiProvider(model=model)
         return gemini, str(gemini.model)
     # auto: gemini when keyed, else fake (never spends by accident)
     import os
@@ -85,7 +88,7 @@ def _provider(kind: str, custom: dict[str, Any] | None = None) -> tuple[Any, str
     if os.getenv("GEMINI_API_KEY"):
         from ..providers.gemini import GeminiProvider
 
-        auto: Any = GeminiProvider()
+        auto: Any = GeminiProvider(model=model)
         return auto, str(auto.model)
     from ..providers.fake import FakeProvider
 
@@ -97,6 +100,113 @@ def _config(overrides: dict[str, Any]) -> HarnessConfig:
     if overrides:
         base = base.model_copy(update=overrides)
     return base
+
+
+SKIP_TREE_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache",
+                  ".ruff_cache", "node_modules", ".mypy_cache"}
+MAX_TREE_ENTRIES = 2000
+MAX_FILE_CHARS = 100_000
+
+
+def rec_or_404(reg: Registry, sid: str) -> SessionRecord:
+    rec = reg.get(sid)
+    if rec is None or rec.session is None or rec.session.workspace is None:
+        raise HTTPException(404, "unknown session or no workspace yet")
+    return rec
+
+
+def _tree(workspace: Path) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+
+    def walk(dirpath: Path, rel: str, depth: int) -> None:
+        if len(out) >= MAX_TREE_ENTRIES or depth > 6:
+            return
+        try:
+            entries = sorted(dirpath.iterdir(),
+                             key=lambda p: (p.is_file(), p.name.lower()))
+        except OSError:
+            return
+        for p in entries:
+            if p.name in SKIP_TREE_DIRS or len(out) >= MAX_TREE_ENTRIES:
+                continue
+            r = f"{rel}{p.name}"
+            if p.is_dir():
+                out.append({"path": r, "type": "dir"})
+                walk(p, r + "/", depth + 1)
+            elif p.is_file():
+                try:
+                    size = p.stat().st_size
+                except OSError:
+                    continue
+                out.append({"path": r, "type": "file", "size": size})
+
+    walk(workspace, "", 0)
+    return out
+
+
+def _resolve_ws(rec: SessionRecord, rel: str) -> Path:
+    assert rec.session is not None and rec.session.workspace is not None
+    root = rec.session.workspace.resolve()
+    target = (root / rel).resolve()
+    if target != root and not target.is_relative_to(root):
+        raise HTTPException(400, f"path escapes workspace: {rel!r}")
+    return target
+
+
+def _read_ws_file(rec: SessionRecord, rel: str) -> tuple[str, bool]:
+    target = _resolve_ws(rec, rel)
+    if not target.is_file():
+        raise HTTPException(404, f"no such file: {rel!r}")
+    try:
+        raw = target.read_bytes()
+    except OSError as e:
+        raise HTTPException(400, f"unreadable file: {e}")
+    if b"\x00" in raw[:4096]:
+        return "(binary file, not shown)", True
+    text = raw.decode("utf-8", errors="replace")
+    if len(text) > MAX_FILE_CHARS:
+        return (text[:MAX_FILE_CHARS]
+                + f"\n[... truncated at {MAX_FILE_CHARS} chars ...]"), True
+    return text, False
+
+
+def _git_show(rec: SessionRecord, rel: str) -> str | None:
+    """Baseline-committed content (None when the file is new/untracked)."""
+    import subprocess
+
+    assert rec.session is not None and rec.session.workspace is not None
+    try:
+        proc = subprocess.run(
+            ["git", "show", f"HEAD:{rel.replace(chr(92), '/')}"],
+            check=False, cwd=rec.session.workspace,
+            capture_output=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.decode("utf-8", errors="replace")
+
+
+def _with_attachments(rec: SessionRecord, content: str,
+                      rels: list[str]) -> str:
+    """Build a follow-up task: attached workspace files + instruction.
+
+    Same workspace persists across runs, so edits accumulate — the
+    interactive loop. Big files truncate with a marker (never silent).
+    """
+    if not rels:
+        return content
+    parts = []
+    for rel in rels[:10]:  # hard cap: 10 files per message
+        try:
+            text, truncated = _read_ws_file(rec, rel)
+        except HTTPException as e:
+            text, truncated = f"(unreadable: {e.detail})", True
+        note = " (truncated)" if truncated else ""
+        parts.append(f"=== {rel}{note} ===\n{text}")
+    return ("Context files (already in your workspace):\n\n"
+            + "\n\n".join(parts) + f"\n\nTask: {content}")
 
 
 def _policy(workspace: Path, token_budget: int | None) -> Any:
@@ -137,24 +247,29 @@ def create_app(db_path: str = ".lever_sessions.db",
         state_reg: Registry = app.state.registry
         return state_reg
 
+    from ..core.session import Session as _Session
+
+    def ensure_workspace(rec: SessionRecord) -> Path:
+        if rec.session is None:
+            rec.session = _Session(source=Path(rec.source))
+            rec.session.session_id = rec.id
+            rec.session.open()
+        assert rec.session.workspace is not None
+        return rec.session.workspace
+
     async def _run_session(rec: SessionRecord, task_text: str) -> None:
         from ..core.loop import run_loop
-        from ..core.session import Session
 
         rec.status = "running"
         rec.task = task_text
         try:
-            if rec.session is None:
-                rec.session = Session(source=Path(rec.source))
-                # The workspace session must log under the API session id —
-                # otherwise events and registry diverge (two ids, lost log).
-                rec.session.session_id = rec.id
-                rec.session.open()
-            assert rec.session.workspace is not None
-            provider, _name = _provider(rec.provider, app.state.providers)
+            workspace = ensure_workspace(rec)
+            assert rec.session is not None
+            provider, model_name = _provider(
+                rec.provider, app.state.providers, rec.model)
+            rec.model = model_name
             cfg = _config(rec.config)
-            policy = _policy(rec.session.workspace,
-                             rec.config.get("token_budget"))
+            policy = _policy(workspace, rec.config.get("token_budget"))
             loop = asyncio.get_running_loop()
 
             async def approve(request: dict[str, Any]) -> bool:
@@ -183,6 +298,7 @@ def create_app(db_path: str = ".lever_sessions.db",
     def _summary(rec: SessionRecord) -> dict[str, Any]:
         return {"id": rec.id, "source": rec.source, "task": rec.task,
                 "status": rec.status, "error": rec.error,
+                "model": rec.model, "provider": rec.provider,
                 "pending_approvals": sorted(rec.pending)}
 
     @app.post("/sessions")
@@ -191,6 +307,7 @@ def create_app(db_path: str = ".lever_sessions.db",
             raise HTTPException(400, f"repo not found: {body.repo}")
         rec = reg().create(body.repo, body.task, dict(body.config),
                            body.provider)
+        rec.model = body.model or ""
         if "token_budget" not in rec.config and body.token_budget is not None:
             rec.config["token_budget"] = body.token_budget
         out = _summary(rec)
@@ -210,6 +327,11 @@ def create_app(db_path: str = ".lever_sessions.db",
             raise HTTPException(404, "unknown session")
         return _summary(rec)
 
+    def _with_attachments_open(rec: SessionRecord, content: str,
+                                 rels: list[str]) -> str:
+        ensure_workspace(rec)
+        return _with_attachments(rec, content, rels)
+
     @app.post("/sessions/{sid}/messages")
     async def post_message(sid: str, body: MessageBody) -> dict[str, Any]:
         rec = reg().get(sid)
@@ -217,7 +339,8 @@ def create_app(db_path: str = ".lever_sessions.db",
             raise HTTPException(404, "unknown session")
         if rec.status in ("running", "waiting_approval"):
             raise HTTPException(409, "session already running")
-        rec.run_task = asyncio.create_task(_run_session(rec, body.content))
+        task_text = _with_attachments_open(rec, body.content, body.files)
+        rec.run_task = asyncio.create_task(_run_session(rec, task_text))
         return _summary(rec)
 
     @app.get("/sessions/{sid}/events")
@@ -236,6 +359,41 @@ def create_app(db_path: str = ".lever_sessions.db",
         if rec is None or rec.session is None:
             raise HTTPException(404, "unknown session or no workspace yet")
         return {"diff": rec.session.get_diff()}
+
+    @app.get("/providers")
+    async def list_providers() -> list[dict[str, Any]]:
+        """Model/provider picker for the UI: id, display model, configured?"""
+        import os
+
+        return [
+            {"id": "auto", "model": "auto",
+             "configured": True, "cost": "decided by env"},
+            {"id": "fake", "model": "fake (scripted)",
+             "configured": True, "cost": "$0"},
+            {"id": "local", "model": os.getenv("LEVER_LOCAL_MODEL", ""),
+             "configured": bool(os.getenv("LEVER_LOCAL_MODEL")), "cost": "$0"},
+            {"id": "gemini", "model": os.getenv("LEVER_MODEL", ""),
+             "configured": bool(os.getenv("GEMINI_API_KEY")), "cost": "metered"},
+        ]
+
+    @app.get("/sessions/{sid}/files")
+    async def list_files(sid: str) -> list[dict[str, Any]]:
+        rec = reg().get(sid)
+        if rec is None or rec.session is None or rec.session.workspace is None:
+            raise HTTPException(404, "unknown session or no workspace yet")
+        return _tree(rec.session.workspace)
+
+    @app.get("/sessions/{sid}/file")
+    async def get_file(sid: str, path: str = Query(...)) -> dict[str, Any]:
+        content, truncated = _read_ws_file(rec_or_404(reg(), sid), path)
+        return {"path": path, "content": content, "truncated": truncated}
+
+    @app.get("/sessions/{sid}/file-diff")
+    async def get_file_diff(sid: str, path: str = Query(...)) -> dict[str, Any]:
+        rec = rec_or_404(reg(), sid)
+        _content, _ = _read_ws_file(rec, path)
+        original = _git_show(rec, path)
+        return {"path": path, "original": original, "modified": _content}
 
     @app.post("/sessions/{sid}/approvals/{req_id}")
     async def decide_approval(sid: str, req_id: str,

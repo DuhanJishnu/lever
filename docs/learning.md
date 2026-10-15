@@ -545,6 +545,7 @@
 | 35 | Policy engine (4 rules) | `policy/engine.py`, `policy/rules.py`, loop wiring | Code, not prompts; history-scanned state |
 | 36 | Server (REST+SSE, approvals) | `server/app.py`, `sessions.py`, CLI serve | Futures for approvals; ASGI tests, not TestClient |
 | 37 | Web UI (Run/Sessions/Evals) | `web/` Vite+React+Tailwind, `/eval-summary` | Hand-rolled SVG/diff; no Monaco/Recharts |
+| 38 | IDE UI (files+@+models) | file endpoints, follow-ups, `GeminiProvider(model=)` | Only demo-necessary interactivity |
 | 38 | Calibration tasks x01-x04/m05-m06 | `evals/tasks/`, `SPLIT.md`, `regen_more.py` | Discrimination by design; generate diffs |
 | 39 | Calibration pilot + grep warning | local b0/b1 on new tasks | Edit-fails nonzero; headroom restored |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
@@ -1031,6 +1032,35 @@ scratchpad + outcome unproven — needs Gemini or a stronger local model.
 3. **Theory:** Calibration success ≠ B1 wins. It means the experiment CAN
    resolve the question. The pass story belongs to stronger models (Gemini
    pilots, approved spend).
+
+---
+
+## IDE UI pass (15 Oct 2026) — Step 40
+
+### Step 40 — Cursor-style console (files right, @-mentions, model picker)
+
+1. **What:** Backend: `GET /providers` (id/model/configured/cost — picker
+   data), `GET /sessions/{id}/files` (capped tree, no .git/venvs),
+   `GET .../file?path=` (100k cap + binary guard + `..` rejection),
+   `GET .../file-diff?path=` (`git show HEAD:path` vs worktree),
+   `POST .../messages` accepts `files[]` (inlined as `=== path ===` context
+   blocks, same workspace persists so edits accumulate across runs),
+   `GeminiProvider(model=)` override, per-session resolved `model` in
+   summaries. Frontend: IDE grid (chat + prompt left; explorer + viewer
+   right), @-autocomplete from the live tree, attachment chips, provider
+   dropdown (dims unconfigured) + Gemini model-override box, per-file
+   unified diff (LCS, CRLF-normalized), changed-file dots, replay unchanged.
+   Verified: catalog shows real env models; attach/tree/content/diff/escape
+   all 200/400-correct; tsc + build clean; 95 green.
+2. **Why:** Demo-ability is a project deliverable (Definition of Done: video +
+   README). Every addition serves it: files-right shows the work, @-mentions
+   make tries interactive, model picker removes terminal round-trips.
+   Skipped per your rule: Monaco (needs original/modified plumbing the API
+   doesn't shape), theme work, multi-tab editors.
+3. **Theory:** Interactive loop = same workspace + appended context + fresh
+   run. No loop changes needed because sessions already own their workspace;
+   follow-ups are just tasks that carry their own context. The UI stays a
+   lens over events + workspace files — still no private state.
 
 ---
 

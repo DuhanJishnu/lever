@@ -22,6 +22,7 @@ class SessionRecord:
     task: str | None = None
     config: dict[str, Any] = field(default_factory=dict)
     provider: str = "auto"
+    model: str = ""  # resolved provider/model name, set when a run starts
     status: str = "idle"  # idle | running | waiting_approval | done | error
     session: Session | None = None
     run_task: asyncio.Task[Any] | None = None

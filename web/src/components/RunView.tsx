@@ -3,11 +3,21 @@ import { api, SessionSummary } from "../api";
 import { useSessionEvents } from "../hooks";
 import { Approvals } from "./Approvals";
 import { ContextMeter } from "./ContextMeter";
-import { DiffView } from "./DiffView";
+import { FileExplorer } from "./FileExplorer";
+import { FileView } from "./FileView";
+import { NewTaskBar, PromptBox } from "./PromptBox";
 import { Transcript } from "./Transcript";
 
-export function RunView({ sid, onDone }: { sid: string | null; onDone: () => void }) {
+/** Cursor-style IDE: chat left, files right. */
+export function IDE({ sid, onSession }: {
+  sid: string | null;
+  onSession: (id: string) => void;
+}) {
   const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const [openPath, setOpenPath] = useState<string | null>(null);
+  const [showDiff, setShowDiff] = useState(true);
+  const [changed, setChanged] = useState<Set<string>>(new Set());
+  const [tick, setTick] = useState(0);
   const live = summary === null || ["running", "waiting_approval"].includes(summary.status);
   const events = useSessionEvents(sid, live);
 
@@ -19,30 +29,79 @@ export function RunView({ sid, onDone }: { sid: string | null; onDone: () => voi
         setSummary(s);
         if (s.status === "done" || s.status === "error") {
           clearInterval(t);
-          onDone();
+          setTick((n) => n + 1);
         }
-      } catch { /* session gone */ }
+      } catch { /* gone */ }
     }, 1000);
     return () => clearInterval(t);
-  }, [sid, onDone]);
+  }, [sid]);
 
-  if (!sid) return <div className="text-slate-500">Create or pick a session to watch it run.</div>;
+  useEffect(() => {
+    if (!sid) return;
+    api.getDiff(sid).then((d) => setChanged(parseChanged(d.diff))).catch(() => undefined);
+  }, [sid, tick, events.length]);
+
+  async function start(repo: string, task: string, provider: string, model: string) {
+    const s = await api.createSession({ repo, task, provider, model: model || undefined });
+    onSession(s.id);
+  }
+
+  async function followUp(content: string, files: string[]) {
+    if (!sid) return;
+    await api.postMessage(sid, content, files);
+  }
+
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <div>
-        <div className="mb-2 flex items-center gap-2 text-sm">
-          <span className="font-mono text-slate-400">{sid}</span>
-          <StatusBadge status={summary?.status ?? "?"} />
-          {summary?.error && <span className="text-red-300">{summary.error}</span>}
+    <div>
+      <NewTaskBar onRun={start} />
+      {!sid ? (
+        <div className="text-sm text-slate-500">Start a task above — the agent works in a copy; your repo stays clean.</div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="min-w-0">
+            <div className="mb-2 flex items-center gap-2 text-sm">
+              <span className="font-mono text-slate-400">{sid}</span>
+              <StatusBadge status={summary?.status ?? "?"} />
+              {summary?.model && (
+                <span className="rounded bg-slate-700 px-2 py-0.5 font-mono text-xs">{summary.model}</span>
+              )}
+              {summary?.error && <span className="text-red-300">{summary.error}</span>}
+            </div>
+            <div className="mb-3"><ContextMeter sid={sid} events={events} /></div>
+            <div className="mb-3 max-h-[46vh] overflow-auto"><Transcript events={events} /></div>
+            <PromptBox sid={sid} disabled={!summary || !["done", "error", "idle"].includes(summary.status)} onSend={followUp} />
+            <div className="mt-1 text-xs text-slate-500">
+              {summary && !["done", "error", "idle"].includes(summary.status)
+                ? "Agent running — prompt unlocks when it stops."
+                : "Idle — send a follow-up (edits accumulate in the same workspace)."}
+            </div>
+          </div>
+          <div className="grid min-w-0 grid-cols-[180px_1fr] gap-2">
+            <div className="max-h-[70vh] overflow-auto rounded border border-slate-700/60 p-2">
+              <FileExplorer sid={sid} changed={changed} openPath={openPath} onOpen={setOpenPath} />
+            </div>
+            <div className="min-w-0">
+              {!openPath ? (
+                <div className="text-sm text-slate-500">Pick a file. <span className="text-amber-300">●</span> = changed.</div>
+              ) : (
+                <div>
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="font-mono text-xs text-slate-300">{openPath}</span>
+                    <button onClick={() => setShowDiff(!showDiff)}
+                      className="rounded bg-slate-700 px-2 py-0.5 text-xs hover:bg-slate-600">
+                      {showDiff ? "show file" : "show changes"}
+                    </button>
+                  </div>
+                  <div className="max-h-[66vh] overflow-auto">
+                    <FileView sid={sid} path={openPath} showDiff={showDiff} refreshKey={events.length} />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="mb-4"><ContextMeter sid={sid} events={events} /></div>
-        <Transcript events={events} />
-      </div>
-      <div>
-        <h3 className="mb-2 text-sm font-semibold text-slate-300">Diff</h3>
-        <DiffView sid={sid} refreshKey={events.length} />
-      </div>
-      <Approvals sid={sid} events={events} onDecided={() => undefined} />
+      )}
+      {sid && <Approvals sid={sid} events={events} onDecided={() => undefined} />}
     </div>
   );
 }
@@ -56,48 +115,11 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`rounded px-2 py-0.5 text-xs ${color}`}>{status}</span>;
 }
 
-export function NewSessionForm({ onCreated }: { onCreated: (id: string) => void }) {
-  const [repo, setRepo] = useState("D:/Lever/bug-repo");
-  const [task, setTask] = useState("Read add.py, find the bug, fix it.");
-  const [provider, setProvider] = useState("auto");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  async function submit() {
-    setBusy(true);
-    setErr("");
-    try {
-      const s = await api.createSession({ repo, task, provider });
-      onCreated(s.id);
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setBusy(false);
-    }
+function parseChanged(stat: string): Set<string> {
+  const out = new Set<string>();
+  for (const line of stat.split("\n")) {
+    const m = line.match(/^\s*(\S.*?)\s+\|\s+\d+/);
+    if (m) out.add(m[1].trim());
   }
-
-  return (
-    <div className="mb-4 rounded border border-slate-700 bg-slate-800/40 p-4">
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-        <input value={repo} onChange={(e) => setRepo(e.target.value)}
-          className="rounded bg-slate-900 px-2 py-1.5 font-mono text-sm" placeholder="repo path" />
-        <input value={task} onChange={(e) => setTask(e.target.value)}
-          className="rounded bg-slate-900 px-2 py-1.5 text-sm md:col-span-1" placeholder="task" />
-        <div className="flex gap-2">
-          <select value={provider} onChange={(e) => setProvider(e.target.value)}
-            className="rounded bg-slate-900 px-2 py-1.5 text-sm">
-            <option value="auto">auto</option>
-            <option value="fake">fake</option>
-            <option value="gemini">gemini</option>
-            <option value="local">local</option>
-          </select>
-          <button disabled={busy} onClick={submit}
-            className="rounded bg-emerald-600 px-4 py-1.5 text-sm hover:bg-emerald-500 disabled:opacity-50">
-            Run
-          </button>
-        </div>
-      </div>
-      {err && <div className="mt-2 text-sm text-red-300">{err}</div>}
-    </div>
-  );
+  return out;
 }
