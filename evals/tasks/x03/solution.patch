@@ -1,0 +1,17 @@
+diff --git a/parsers.py b/parsers.py
+--- a/parsers.py
++++ b/parsers.py
+@@ -1,12 +1,12 @@
+ def parse_csv(text):
+     rows = []
+     for line in text.splitlines():
+         rows.append(line.split(","))
+     return rows
+ 
+ 
+ def parse_tsv(text):
+     rows = []
+     for line in text.splitlines():
+-        rows.append(line.split(","))
++        rows.append(line.split("\t"))
+     return rows

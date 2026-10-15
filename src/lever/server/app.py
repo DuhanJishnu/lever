@@ -45,6 +45,21 @@ class ApprovalBody(BaseModel):
     allow: bool = True
 
 
+def _read_summaries(root: str) -> dict[str, Any]:
+    import glob
+    import json as _json
+
+    out: dict[str, Any] = {}
+    pattern = str(Path(root) / "evals" / "results" / "*_summary.json")
+    for path in sorted(glob.glob(pattern)):
+        try:
+            with open(path, encoding="utf-8") as f:
+                out[Path(path).stem] = _json.load(f)
+        except (OSError, ValueError):
+            continue
+    return out
+
+
 def _provider(kind: str, custom: dict[str, Any] | None = None) -> tuple[Any, str]:
     if custom and kind in custom:
         factory: Any = custom[kind]
@@ -294,18 +309,7 @@ def create_app(db_path: str = ".lever_sessions.db",
     @app.get("/eval-summary")
     async def eval_summary() -> dict[str, Any]:
         """Analyze --summary-json outputs for the dashboard. {} when none."""
-        import glob
-        import json as _json
-
-        out: dict[str, Any] = {}
-        pattern = str(Path(app.state.root) / "evals" / "results" / "*_summary.json")
-        for path in sorted(glob.glob(pattern)):
-            try:
-                with open(path, encoding="utf-8") as f:
-                    out[Path(path).stem] = _json.load(f)
-            except (OSError, ValueError):
-                continue
-        return out
+        return await asyncio.to_thread(_read_summaries, str(app.state.root))
 
     @app.exception_handler(Exception)
     async def _errors(request: Any, exc: Exception) -> JSONResponse:

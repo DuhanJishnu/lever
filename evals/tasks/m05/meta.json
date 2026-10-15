@@ -1,0 +1,1 @@
+{"category": "multi-file", "difficulty": "hard", "id": "m05", "test_cmd": "python -m pytest -q", "timeout": 120, "trap": "rows[:-1]"}

@@ -10,11 +10,11 @@ from runner import list_tasks
 
 def test_task_inventory_and_split():
     tasks = list_tasks()
-    assert len(tasks) == 30, f"expected 30 tasks, got {len(tasks)}"
+    assert len(tasks) == 36, f"expected 36 tasks, got {len(tasks)}"
     counts = Counter(t["category"] for t in tasks)
     assert counts == {
-        "bugfix": 10, "feature": 8, "refactor": 5,
-        "multi-file": 4, "write-tests": 3,
+        "bugfix": 14, "feature": 8, "refactor": 5,
+        "multi-file": 6, "write-tests": 3,
     }, dict(counts)
     split = (Path("evals/SPLIT.md")).read_text(encoding="utf-8")
     ids = {t["id"] for t in tasks}

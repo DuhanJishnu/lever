@@ -1,0 +1,2 @@
+DELIMITER = ","
+ENCODING = "utf-8"

@@ -1,0 +1,9 @@
+diff --git a/rate.py b/rate.py
+--- a/rate.py
++++ b/rate.py
+@@ -1,4 +1,4 @@
+ def pct(part, whole):
+     if whole == 0:
+         return 0
+-    return part/whole+100
++    return (part/whole)*100

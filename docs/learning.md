@@ -545,6 +545,7 @@
 | 35 | Policy engine (4 rules) | `policy/engine.py`, `policy/rules.py`, loop wiring | Code, not prompts; history-scanned state |
 | 36 | Server (REST+SSE, approvals) | `server/app.py`, `sessions.py`, CLI serve | Futures for approvals; ASGI tests, not TestClient |
 | 37 | Web UI (Run/Sessions/Evals) | `web/` Vite+React+Tailwind, `/eval-summary` | Hand-rolled SVG/diff; no Monaco/Recharts |
+| 38 | Calibration tasks x01-x04/m05-m06 | `evals/tasks/`, `SPLIT.md`, `regen_more.py` | Discrimination by design; generate diffs |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 
 ---
@@ -990,6 +991,27 @@ scratchpad + outcome unproven — needs Gemini or a stronger local model.
 3. **Theory:** UI is a thin lens over the event log — every screen reads
    events, never private state. That constraint is what makes replay, fork,
    and the dashboard trivially consistent with the run.
+
+---
+
+## Calibration tasks (14 Oct 2026) — Step 38
+
+### Step 38 — 6 discrimination tasks (x01–x04, m05–m06)
+
+1. **What:** 6 new tasks (36 total; inventory test updated) in a new
+   dev-only `SPLIT.md` section (held-out untouched): x01 (task quotes code
+   flat, file nested — whitespace rescue), x02 (task quotes with spaces,
+   file without — fuzzy rescue), x03 (identical lines in two functions —
+   context expansion), x04 (110-line file, bug at line 69 — ranged reads),
+   m05 (5-file export bug, cause ≠ symptom file), m06 (new shared module +
+   2 dependent edits). All validate 36/36 (fail-before, pass-3×-after).
+2. **Why:** Per the plan's own calibration rule: the original 30 score 100%
+   on a strong model and ~0% usefully on a weak one — neither discriminates
+   rungs. These target the exact recovery paths B1/B2/B3/B7 claim to add
+   (edit-failure rate should now MOVE between configs, which we record).
+3. **Theory:** Design tasks backward from the mechanism under test
+   (ws-tolerance, fuzzy tolerance, multi-match, ranges, cross-file search),
+   not from "looks hard". A calibration task is an instrument, not a puzzle.
 
 ---
 

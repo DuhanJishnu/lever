@@ -1,0 +1,12 @@
+diff --git a/rates.py b/rates.py
+--- a/rates.py
++++ b/rates.py
+@@ -66,7 +66,7 @@
+ 
+ def rate_for(code):
+     """Return the rate for a state code (any case), or 0.0 if unknown."""
+-    return RATES.get(code, 0.0)
++    return RATES.get(code.lower(), 0.0)
+ 
+ 
+ def with_tax(amount, code):
