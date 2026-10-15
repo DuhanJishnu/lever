@@ -166,3 +166,19 @@ values, positional+kwarg-tail mixes, and unambiguous key abbreviations
 **Decision: KEEP on mechanism, PARTIAL live.** Workflow shape adopted;
 scratchpad and outcome unproven. The planner delta needs a model that uses
 tools-as-instructed (Gemini pilots) or a stronger local model.
+
+## Calibration pilot (14 Oct 2026) -- x01-x04/m05-m06 x b0/b1, local, $0
+
+| config | pass@1 | editfail | notes |
+|---|---|---|---|
+| b0 | 0.67 (4/6) | 13 | m05/x01/x02/x04 pass; m06/x03 fail |
+| b1 | 0.50 (3/6) | 11 | m05/x01/x02 pass; rest fail |
+| paired | d -0.17 | -- | noise at n=6; direction meaningless |
+
+Calibration SUCCEEDS on its own terms: edit failures 13 vs 11 (both
+nonzero -- the original 30 showed 0 everywhere), mixed outcomes, and a 27-step
+exploration (x03 b0). B0 sits at 67% here vs 100% on the originals: headroom
+for rungs to show. Pass deltas on a flappy 4B model remain noise; the
+discrimination that matters (edit-failure recovery paths firing) is now
+measurable, which is exactly what B1 claims to improve. These 6 join all
+future local ladders; Gemini pilots will tell the pass story.

@@ -19,8 +19,12 @@ def make_grep_tool(root: Path) -> Tool:
     root = root.resolve()
 
     async def _run(args: dict[str, Any]) -> str:
+        import warnings
+
         try:
-            rx = re.compile(str(args.get("pattern", "")))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                rx = re.compile(str(args.get("pattern", "")))
         except re.error as e:
             return f"grep: invalid regex {args.get('pattern')!r}: {e}"
         sub = str(args.get("path", "."))

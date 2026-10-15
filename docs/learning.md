@@ -546,6 +546,7 @@
 | 36 | Server (REST+SSE, approvals) | `server/app.py`, `sessions.py`, CLI serve | Futures for approvals; ASGI tests, not TestClient |
 | 37 | Web UI (Run/Sessions/Evals) | `web/` Vite+React+Tailwind, `/eval-summary` | Hand-rolled SVG/diff; no Monaco/Recharts |
 | 38 | Calibration tasks x01-x04/m05-m06 | `evals/tasks/`, `SPLIT.md`, `regen_more.py` | Discrimination by design; generate diffs |
+| 39 | Calibration pilot + grep warning | local b0/b1 on new tasks | Edit-fails nonzero; headroom restored |
 | 32 | B5 compaction (tiers + summary) | `context/compaction.py`, `core/loop.py` | Tripwire needs 100k+ histories; offline proof |
 
 ---
@@ -1012,6 +1013,24 @@ scratchpad + outcome unproven — needs Gemini or a stronger local model.
 3. **Theory:** Design tasks backward from the mechanism under test
    (ws-tolerance, fuzzy tolerance, multi-match, ranges, cross-file search),
    not from "looks hard". A calibration task is an instrument, not a puzzle.
+
+---
+
+## Calibration pilot results (14 Oct 2026) — Step 39
+
+### Step 39 — New tasks discriminate (edit-fails 13 vs 11, B0 at 67%)
+
+1. **What:** 6 tasks × b0/b1 local pilot: B0 4/6, B1 3/6 (delta noise),
+   but edit failures 13 vs 11 — both nonzero vs 0 everywhere on the original
+   30. x03-b0 ran a 27-step exploration. B0 headroom restored (67% vs 100%).
+   Also silenced a `FutureWarning` (`re` nested-set warning leaking to harness
+   stderr from model-supplied patterns).
+2. **Why:** The instrument works: it registers the phenomenon B1 claims to
+   fix. Pass deltas on 4B remain noise; the edit-failure channel is the
+   signal — exactly the secondary metric the runner already records.
+3. **Theory:** Calibration success ≠ B1 wins. It means the experiment CAN
+   resolve the question. The pass story belongs to stronger models (Gemini
+   pilots, approved spend).
 
 ---
 
